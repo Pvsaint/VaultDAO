@@ -24,33 +24,33 @@ pub struct Config {
     pub timelock_delay: u64,
 }
 
-/// User roles for RBAC
+/// Permissions assigned to vault participants.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[repr(u32)]
 pub enum Role {
-    /// Read-only access (default)
+    /// Read-only access (default for non-signers).
     Member = 0,
-    /// Can propose and approve transfers
+    /// Authorized to initiate and approve transfer proposals.
     Treasurer = 1,
-    /// Can modify config, add/remove signers, change roles
+    /// Full operational control: manages roles, signers, and configuration.
     Admin = 2,
 }
 
-/// Proposal status lifecycle
+/// The lifecycle states of a proposal.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[repr(u32)]
 pub enum ProposalStatus {
-    /// Awaiting approvals
+    /// Initial state, awaiting more approvals.
     Pending = 0,
-    /// Threshold met, ready for execution
+    /// Voting threshold met. Ready for execution (checked against timelocks).
     Approved = 1,
-    /// Successfully executed
+    /// Funds successfully transferred and record finalized.
     Executed = 2,
-    /// Rejected by admin or proposer
+    /// Manually cancelled by an admin or the proposer.
     Rejected = 3,
-    /// Past expiration ledger
+    /// Reached expiration ledger without hitting the approval threshold.
     Expired = 4,
 }
 

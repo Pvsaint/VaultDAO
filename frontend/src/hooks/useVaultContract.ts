@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import {
-    rpc,
-    scValToNative,
     xdr,
     Address,
+    Operation,
     TransactionBuilder,
-    SorobanRpc
+    SorobanRpc,
+    nativeToScVal
 } from 'stellar-sdk';
 import { signTransaction } from '@stellar/freighter-api';
 import { useWallet } from '../context/WalletContext';
@@ -41,20 +41,21 @@ export const useVaultContract = () => {
             const tx = new TransactionBuilder(account, { fee: "100" })
                 .setNetworkPassphrase(NETWORK_PASSPHRASE)
                 .setTimeout(30)
-                .addOperation(xdr.Operation.invokeHostFunction({
-                    func: xdr.HostFunction.hostFunctionTypeInvokeContract([
-                        xdr.ScVal.scvAddress(Address.fromString(CONTRACT_ID).toScAddress()),
-                        xdr.ScVal.scvSymbol("propose_transfer"),
-                        xdr.ScVal.scvVec([
-                            // Args: proposer, recipient, token, amount, memo
-                            new Address(address).toScVal(),
-                            new Address(recipient).toScVal(),
-                            new Address(token).toScVal(),
-                            xdr.ScVal.scvI128(xdr.Int128Parts.fromId(amount)), // Simplified for demo
-                            xdr.ScVal.scvSymbol(memo),
-                        ]),
-                    ]),
-                    auth: [], // Authorization handled by simulation usually
+                .addOperation(Operation.invokeHostFunction({
+                    func: xdr.HostFunction.hostFunctionTypeInvokeContract(
+                        new xdr.InvokeContractArgs({
+                            contractAddress: Address.fromString(CONTRACT_ID).toScAddress(),
+                            functionName: "propose_transfer",
+                            args: [
+                                new Address(address).toScVal(),
+                                new Address(recipient).toScVal(),
+                                new Address(token).toScVal(),
+                                nativeToScVal(BigInt(amount)),
+                                xdr.ScVal.scvSymbol(memo),
+                            ],
+                        })
+                    ),
+                    auth: [],
                 }))
                 .build();
 
@@ -73,7 +74,7 @@ export const useVaultContract = () => {
             });
 
             // 5. Submit Transaction
-            const response = await server.sendTransaction(new TransactionBuilder.fromXDR(signedXdr, NETWORK_PASSPHRASE));
+            const response = await server.sendTransaction(TransactionBuilder.fromXDR(signedXdr as string, NETWORK_PASSPHRASE));
 
             if (response.status !== "PENDING") {
                 throw new Error("Transaction submission failed");

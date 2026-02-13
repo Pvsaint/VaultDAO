@@ -16,11 +16,15 @@ use errors::VaultError;
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec};
 use types::{Config, Proposal, ProposalStatus, Role};
 
-/// Proposal expiration: ~7 days in ledgers (5 seconds per ledger)
-const PROPOSAL_EXPIRY_LEDGERS: u64 = 120_960;
-
+/// The main contract structure for VaultDAO.
+///
+/// Implements a multi-signature treasury with Role-Based Access Control (RBAC),
+/// spending limits, timelocks, and recurring payment support.
 #[contract]
 pub struct VaultDAO;
+
+/// Proposal expiration: ~7 days in ledgers (5 seconds per ledger)
+const PROPOSAL_EXPIRY_LEDGERS: u64 = 120_960;
 
 #[contractimpl]
 impl VaultDAO {
@@ -28,14 +32,20 @@ impl VaultDAO {
     // Initialization
     // ========================================================================
 
-    /// Initialize the vault with initial configuration
+    /// Initialize the vault with its core configuration.
+    ///
+    /// This function can only be called once. It sets up the security parameters
+    /// (threshold, signers) and the financial constraints (limits).
     ///
     /// # Arguments
-    /// * `admin` - Initial admin address (will also be first signer)
-    /// * `signers` - List of authorized signers (must include admin)
-    /// * `threshold` - Required approvals (M in M-of-N)
-    /// * `spending_limit` - Max amount per proposal
-    /// * `daily_limit` - Max aggregate daily spending
+    /// * `admin` - Initial administrator address who can manage roles and config.
+    /// * `signers` - The initial set of addresses authorized to approve proposals.
+    /// * `threshold` - The 'M' in M-of-N. Number of approvals required for execution.
+    /// * `spending_limit` - The maximum amount allowed for a single proposal.
+    /// * `daily_limit` - The 24-hour aggregate spending limit.
+    /// * `weekly_limit` - The 7-day aggregate spending limit.
+    /// * `timelock_threshold` - Proposals exceeding this amount trigger a mandatory delay.
+    /// * `timelock_delay` - The duration of the timelock delay (in ledgers).
     pub fn initialize(
         env: Env,
         admin: Address,
@@ -96,9 +106,20 @@ impl VaultDAO {
     // Proposal Management
     // ========================================================================
 
-    /// Propose a new transfer
+    /// Propose a new transfer of tokens from the vault.
     ///
-    /// Only Treasurer or Admin can propose. Subject to spending limits.
+    /// The proposal must be authorized by an account with either the `Treasurer` or `Admin` role.
+    /// The amount is checked against the single-proposal, daily, and weekly limits.
+    ///
+    /// # Arguments
+    /// * `proposer` - The address initiating the proposal (must authorize).
+    /// * `recipient` - The destination address for the funds.
+    /// * `token_addr` - The contract ID of the Stellar Asset Contract (SAC) or custom token.
+    /// * `amount` - The transaction amount (in stroops/smallest unit).
+    /// * `memo` - A descriptive symbol for the transaction.
+    ///
+    /// # Returns
+    /// The unique ID of the newly created proposal.
     pub fn propose_transfer(
         env: Env,
         proposer: Address,
@@ -174,9 +195,15 @@ impl VaultDAO {
         Ok(proposal_id)
     }
 
-    /// Approve a pending proposal
+    /// Approve a pending proposal.
     ///
-    /// Requires cryptographic proof of signer identity via `require_auth()`.
+    /// Approval requires `require_auth()` from a valid signer.
+    /// When the threshold is reached, the status changes to `Approved`.
+    /// If the amount exceeds the `timelock_threshold`, an `unlock_ledger` is calculated.
+    ///
+    /// # Arguments
+    /// * `signer` - The authorized address providing approval.
+    /// * `proposal_id` - ID of the proposal to approve.
     pub fn approve_proposal(env: Env, signer: Address, proposal_id: u64) -> Result<(), VaultError> {
         // Verify identity - CRITICAL for security
         signer.require_auth();
@@ -249,9 +276,17 @@ impl VaultDAO {
         Ok(())
     }
 
-    /// Execute an approved proposal
+    /// Finalizes and executes an approved proposal.
     ///
-    /// Anyone can call this once the proposal is approved.
+    /// Can be called by anyone (even an automated tool) as long as:
+    /// 1. The proposal status is `Approved`.
+    /// 2. The required approvals threshold has been met.
+    /// 3. Any applicable timelock has expired.
+    /// 4. The vault has sufficient balance of the target token.
+    ///
+    /// # Arguments
+    /// * `executor` - The address triggering the final transfer (must authorize).
+    /// * `proposal_id` - ID of the proposal to execute.
     pub fn execute_proposal(env: Env, executor: Address, proposal_id: u64) -> Result<(), VaultError> {
         // Executor must authorize (to prevent griefing)
         executor.require_auth();
