@@ -11,7 +11,7 @@ import {
 import { signTransaction } from '@stellar/freighter-api';
 import { useWallet } from '../context/WalletContext';
 import { parseError } from '../utils/errorParser';
-import type { VaultActivity, VaultEventsFilters, GetVaultEventsResult, VaultEventType } from '../types/activity';
+import type { VaultActivity, GetVaultEventsResult, VaultEventType } from '../types/activity';
 
 // Replace with your actual Contract ID
 const CONTRACT_ID = "CDXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
@@ -40,18 +40,14 @@ function getEventTypeFromTopic(topic0Base64: string): VaultEventType {
     }
 }
 
-function addressFromScVal(scv: xdr.ScVal): string {
-    try {
-        const native = scValToNative(scv);
-        if (typeof native === 'object' && native && 'address' in native) {
-            const addr = (native as { address: () => string }).address?.() ?? String(native);
-            return addr;
-        }
-        if (typeof native === 'string') return native;
-        return '';
-    } catch {
-        return '';
+function addressToNative(addrScVal: unknown): string {
+    if (typeof addrScVal === 'string') return addrScVal;
+    if (addrScVal != null && typeof addrScVal === 'object') {
+        const o = addrScVal as Record<string, unknown>;
+        if (typeof o.address === 'function') return (o.address as () => string)();
+        if (typeof o.address === 'string') return o.address;
     }
+    return String(addrScVal ?? '');
 }
 
 function parseEventValue(valueXdrBase64: string, eventType: VaultEventType): { actor: string; details: Record<string, unknown> } {
@@ -62,35 +58,34 @@ function parseEventValue(valueXdrBase64: string, eventType: VaultEventType): { a
         const native = scValToNative(scv);
         if (Array.isArray(native)) {
             const vec = native as unknown[];
+            const first = vec[0];
+            actor = addressToNative(first);
             if (eventType === 'proposal_created' && vec.length >= 3) {
-                actor = addressFromScVal(xdr.ScVal.fromXDR(Buffer.from(JSON.stringify(vec[0])).toString('base64'), 'base64'));
                 details.proposer = actor;
-                details.recipient = vec[1] != null ? String(vec[1]) : '';
+                details.recipient = addressToNative(vec[1]);
                 details.amount = vec[2] != null ? String(vec[2]) : '';
             } else if (eventType === 'proposal_approved' && vec.length >= 3) {
-                actor = vec[0] != null ? String(vec[0]) : '';
                 details.approval_count = vec[1];
                 details.threshold = vec[2];
             } else if (eventType === 'proposal_executed' && vec.length >= 3) {
-                actor = vec[0] != null ? String(vec[0]) : '';
-                details.recipient = vec[1];
-                details.amount = vec[2];
-            } else if (eventType === 'proposal_rejected' && vec.length >= 1) {
-                actor = vec[0] != null ? String(vec[0]) : '';
+                details.recipient = addressToNative(vec[1]);
+                details.amount = vec[2] != null ? String(vec[2]) : '';
+            } else if (eventType === 'proposal_rejected') {
+                // value is single rejector address
             } else if ((eventType === 'signer_added' || eventType === 'signer_removed') && vec.length >= 2) {
-                actor = vec[0] != null ? String(vec[0]) : '';
                 details.total_signers = vec[1];
-            } else if (eventType === 'config_updated' || eventType === 'initialized') {
-                actor = vec[0] != null ? String(vec[0]) : '';
             } else if (eventType === 'role_assigned' && vec.length >= 2) {
-                actor = vec[0] != null ? String(vec[0]) : '';
                 details.role = vec[1];
             } else {
-                actor = vec[0] != null ? String(vec[0]) : '';
                 details.raw = native;
             }
-        } else if (native !== null && typeof native === 'object') {
-            details.raw = native;
+        } else {
+            actor = addressToNative(native);
+            if (eventType === 'proposal_rejected') {
+                // value is just rejector
+            } else if (native !== null && typeof native === 'object') {
+                details.raw = native;
+            }
         }
     } catch {
         details.parseError = true;
@@ -246,9 +241,85 @@ export const useVaultContract = () => {
         }
     };
 
+    const getVaultEvents = async (
+        cursor?: string,
+        limit: number = EVENTS_PAGE_SIZE
+    ): Promise<GetVaultEventsResult> => {
+        try {
+            const latestLedgerRes = await fetch(RPC_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    jsonrpc: '2.0',
+                    id: 1,
+                    method: 'getLatestLedger',
+                }),
+            });
+            const latestLedgerData = await latestLedgerRes.json();
+            const latestLedger = latestLedgerData?.result?.sequence ?? '0';
+            const startLedger = cursor ? undefined : Math.max(1, parseInt(latestLedger, 10) - 50000);
+
+            const params: Record<string, unknown> = {
+                filters: [{ type: 'contract', contractIds: [CONTRACT_ID] }],
+                pagination: { limit: Math.min(limit, 200) },
+            };
+            if (!cursor) params.startLedger = String(startLedger);
+            else params.pagination = { ...(params.pagination as object), cursor };
+
+            const res = await fetch(RPC_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    jsonrpc: '2.0',
+                    id: 2,
+                    method: 'getEvents',
+                    params,
+                }),
+            });
+            const data = await res.json();
+            if (data.error) throw new Error(data.error.message || 'getEvents failed');
+            const events: RawEvent[] = data.result?.events ?? [];
+            const resultCursor = data.result?.cursor;
+            const hasMore = Boolean(resultCursor && events.length === limit);
+
+            const activities: VaultActivity[] = [];
+            for (const ev of events) {
+                const topic0 = ev.topic?.[0];
+                const valueXdr = ev.value?.xdr;
+                if (!topic0) continue;
+                const eventType = getEventTypeFromTopic(topic0);
+                const { actor, details } = valueXdr
+                    ? parseEventValue(valueXdr, eventType)
+                    : { actor: '', details: {} as Record<string, unknown> };
+                const timestamp = ev.ledgerClosedAt || new Date().toISOString();
+                activities.push({
+                    id: ev.id,
+                    type: eventType,
+                    timestamp,
+                    ledger: ev.ledger,
+                    actor,
+                    details: { ...details, ledger: ev.ledger },
+                    eventId: ev.id,
+                    pagingToken: ev.pagingToken,
+                });
+            }
+
+            return {
+                activities,
+                latestLedger: data.result?.latestLedger ?? latestLedger,
+                cursor: resultCursor,
+                hasMore,
+            };
+        } catch (e) {
+            console.error('getVaultEvents', e);
+            return { activities: [], latestLedger: '0', hasMore: false };
+        }
+    };
+
     return {
         proposeTransfer,
         rejectProposal,
+        getVaultEvents,
         loading
     };
 };

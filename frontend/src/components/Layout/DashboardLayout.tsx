@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, FileText, Settings, Wallet, Menu, X } from 'lucide-react';
+import { LayoutDashboard, FileText, Settings, Wallet, Menu, X, Activity as ActivityIcon } from 'lucide-react';
 import { useWallet } from '../../context/WalletContext';
 
 const DashboardLayout: React.FC = () => {
@@ -15,6 +15,7 @@ const DashboardLayout: React.FC = () => {
     const navItems = [
         { label: 'Overview', path: '/dashboard', icon: LayoutDashboard },
         { label: 'Proposals', path: '/dashboard/proposals', icon: FileText },
+        { label: 'Activity', path: '/dashboard/activity', icon: ActivityIcon },
         { label: 'Settings', path: '/dashboard/settings', icon: Settings },
     ];
 
