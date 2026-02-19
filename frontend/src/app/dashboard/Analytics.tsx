@@ -266,7 +266,7 @@ const Analytics: React.FC = () => {
               className="bg-gray-800 rounded-xl border border-gray-700 p-4 md:p-5"
             >
               <LineChart
-                data={analytics.proposalTrends as Record<string, unknown>[]}
+                data={analytics.proposalTrends as unknown as Record<string, unknown>[]}
                 xKey="date"
                 series={[
                   { dataKey: 'created', name: 'Created', color: '#818cf8' },
@@ -295,7 +295,7 @@ const Analytics: React.FC = () => {
               className="bg-gray-800 rounded-xl border border-gray-700 p-4 md:p-5 md:col-span-2 xl:col-span-1"
             >
               <LineChart
-                data={analytics.treasuryBalance as Record<string, unknown>[]}
+                data={analytics.treasuryBalance as unknown as Record<string, unknown>[]}
                 xKey="date"
                 series={[{ dataKey: 'total', name: 'Cumulative volume', color: '#8b5cf6' }]}
                 height={280}
