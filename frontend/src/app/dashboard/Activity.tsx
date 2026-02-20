@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react'; // Added useCallback
 import { useVaultContract } from '../../hooks/useVaultContract';
 import ActivityItem from '../../components/ActivityItem';
 import type { VaultActivity, VaultEventType } from '../../types/activity';
@@ -27,7 +27,8 @@ const Activity: React.FC = () => {
     const [endDate, setEndDate] = useState('');
     const [actorSearch, setActorSearch] = useState('');
 
-    const loadEvents = async (nextCursor?: string, append = false) => {
+    // Wrapped in useCallback to fix the linting warning
+    const loadEvents = useCallback(async (nextCursor?: string, append = false) => {
         setLoading(true);
         try {
             const result = await getVaultEvents(nextCursor, 100);
@@ -41,11 +42,11 @@ const Activity: React.FC = () => {
         } finally {
             setLoading(false);
         }
-    };
+    }, [getVaultEvents]); // Dependency on the hook method
 
     useEffect(() => {
         loadEvents();
-    }, []);
+    }, [loadEvents]); // Now safe to include in the dependency array
 
     const filteredActivities = useMemo(() => {
         let list = [...activities];
@@ -94,7 +95,7 @@ const Activity: React.FC = () => {
             <h2 className="text-3xl font-bold">Activity</h2>
             <p className="text-gray-400">Vault actions and transaction history.</p>
 
-            {/* Filters - stacked on mobile, row on desktop */}
+            {/* Filters */}
             <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 md:p-5 space-y-4">
                 <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm text-gray-400 w-full sm:w-auto">Event type:</span>
@@ -156,7 +157,6 @@ const Activity: React.FC = () => {
 
             {/* Timeline */}
             <div className="relative">
-                {/* Vertical line - hidden on smallest mobile, visible from 768px */}
                 <div
                     className="absolute left-5 md:left-6 top-10 bottom-10 w-0.5 bg-gray-700 -translate-x-1/2 hidden sm:block"
                     aria-hidden
