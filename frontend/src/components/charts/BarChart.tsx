@@ -17,7 +17,7 @@ export interface BarChartSeries {
 }
 
 export interface BarChartProps {
-  data: Record<string, unknown>[];
+  data: Record<string, any>[];
   series: BarChartSeries[];
   xKey: string;
   height?: number;
@@ -48,7 +48,7 @@ const BarChart: React.FC<BarChartProps> = ({
             dataKey={xKey}
             stroke="#9ca3af"
             tick={{ fill: '#9ca3af', fontSize: 11 }}
-            tickFormatter={(v) =>
+            tickFormatter={(v: any) =>
               v && String(v).length > 12 ? `${String(v).slice(0, 8)}...` : v
             }
           />
@@ -63,9 +63,9 @@ const BarChart: React.FC<BarChartProps> = ({
           />
           <Legend
             wrapperStyle={{ fontSize: 12 }}
-            formatter={(value) => <span className="text-gray-400">{value}</span>}
+            formatter={(value: any) => <span className="text-gray-400">{value}</span>}
           />
-          {series.map((s, i) => (
+          {series.map((s: any, i: number) => (
             <Bar
               key={s.dataKey}
               dataKey={s.dataKey}

@@ -59,7 +59,7 @@ const PieChart: React.FC<PieChartProps> = ({
             innerRadius={height * 0.2}
             outerRadius={height * 0.38}
             paddingAngle={2}
-            label={({ name, percent }) =>
+            label={({ name, percent }: any) =>
               `${name} ${percent}%`
             }
           >
@@ -87,7 +87,7 @@ const PieChart: React.FC<PieChartProps> = ({
           />
           <Legend
             wrapperStyle={{ fontSize: 12 }}
-            formatter={(value, entry) => (
+            formatter={(value: any, entry: any) => (
               <span className="text-gray-400">
                 {value}
                 {(entry?.payload as { percent?: string } | undefined)?.percent != null &&

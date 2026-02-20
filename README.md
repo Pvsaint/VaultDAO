@@ -109,6 +109,17 @@ cargo test
 
 ---
 
+## 📦 SDK & Developer Integration
+
+Integrate VaultDAO into your own application using the official TypeScript SDK.
+
+```bash
+npm install @vaultdao/sdk
+```
+
+- **API Reference**: [docs/API.md](docs/API.md)
+- **SDK README**: [sdk/README.md](sdk/README.md)
+- **Usage examples**: [`sdk/examples/`](sdk/examples/)
 ## 🧪 Testing
 
 VaultDAO has a comprehensive test suite covering smart contract logic and (soon) frontend components.

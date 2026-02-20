@@ -9,7 +9,7 @@ import {
     scValToNative
 } from 'stellar-sdk';
 import { signTransaction } from '@stellar/freighter-api';
-import { useWallet } from '../context/WalletContext'; 
+import { useWallet } from '../context/WalletContext';
 import { parseError } from '../utils/errorParser';
 import type { VaultActivity, GetVaultEventsResult, VaultEventType } from '../types/activity';
 
@@ -126,8 +126,12 @@ export const useVaultContract = () => {
         } catch (e) {
             console.error("Failed to fetch dashboard stats:", e);
             return {
-                totalBalance: "0", totalProposals: 0, pendingApprovals: 0, 
-                readyToExecute: 0, activeSigners: 0, threshold: "0/0"
+                totalBalance: "0",
+                totalProposals: 0,
+                pendingApprovals: 0,
+                readyToExecute: 0,
+                activeSigners: 0,
+                threshold: "0/0"
             };
         }
     }, []);
@@ -307,9 +311,14 @@ export const useVaultContract = () => {
                 const eventType = topic0 ? getEventTypeFromTopic(topic0) : 'unknown';
                 const { actor, details } = valueXdr ? parseEventValue(valueXdr, eventType) : { actor: '', details: {} };
                 return {
-                    id: ev.id, type: eventType, timestamp: ev.ledgerClosedAt || new Date().toISOString(),
-                    ledger: ev.ledger, actor, details: { ...details, ledger: ev.ledger },
-                    eventId: ev.id, pagingToken: ev.pagingToken,
+                    id: ev.id,
+                    type: eventType,
+                    timestamp: ev.ledgerClosedAt || new Date().toISOString(),
+                    ledger: ev.ledger,
+                    actor,
+                    details: { ...details, ledger: ev.ledger },
+                    eventId: ev.id,
+                    pagingToken: ev.pagingToken,
                 };
             });
 

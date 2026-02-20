@@ -1,75 +1,186 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import type { ReactNode } from 'react';
-import { isAllowed, setAllowed, getUserInfo } from '@stellar/freighter-api';
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import type { ReactNode } from "react";
+import {
+  isConnected,
+  isAllowed,
+  setAllowed,
+  getUserInfo,
+  getNetwork,
+} from "@stellar/freighter-api";
+import Toast from "../components/UI/Toast";
+import type { ToastType } from "../components/UI/Toast";
+import { WalletContext } from "./WalletContextProps";
 
-interface WalletContextType {
-    isConnected: boolean;
-    address: string | null;
-    connect: () => Promise<void>;
-    disconnect: () => Promise<void>;
-}
+export const WalletProvider: React.FC<{ children: ReactNode }> = ({
+  children,
+}) => {
+  const [isInstalled, setIsInstalled] = useState(false);
+  const [connected, setConnected] = useState(false);
+  const [address, setAddress] = useState<string | null>(null);
+  const [network, setNetwork] = useState<string | null>(null);
 
-const WalletContext = createContext<WalletContextType | undefined>(undefined);
+  // Refs to track state for comparison in polling
+  const addressRef = useRef<string | null>(null);
+  const networkRef = useRef<string | null>(null);
 
-export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-    const [isConnected, setIsConnected] = useState(false);
-    const [address, setAddress] = useState<string | null>(null);
-    const hasChecked = useRef(false);
+  // Toast state
+  const [toast, setToast] = useState<{
+    message: string;
+    type: ToastType;
+  } | null>(null);
 
-    const checkConnection = useCallback(async () => {
-        try {
-            const allowed = await isAllowed();
-            if (allowed) {
-                const userInfo = await getUserInfo();
-                if (userInfo?.publicKey) {
-                    setIsConnected(true);
-                    setAddress(userInfo.publicKey);
-                }
-            }
-        } catch (e) {
-            console.error("Connection check failed", e);
-        }
-    }, []);
+  const showToast = useCallback((message: string, type: ToastType = "info") => {
+    setToast({ message, type });
+  }, []);
 
-    useEffect(() => {
-        if (!hasChecked.current) {
-            // Using setTimeout(..., 0) moves the state update to the next tick,
-            // bypassing the "synchronous setState in effect" lint error.
-            const timer = setTimeout(() => {
-                void checkConnection();
-            }, 0);
-            
-            hasChecked.current = true;
-            return () => clearTimeout(timer);
-        }
-    }, [checkConnection]);
+  const clearToast = useCallback(() => setToast(null), []);
 
-    const connect = async () => {
-        try {
-            await setAllowed();
-            await checkConnection();
-        } catch (e) {
-            console.error("Failed to connect wallet", e);
-        }
-    };
-
-    const disconnect = async () => {
-        setIsConnected(false);
-        setAddress(null);
-    };
-
-    return (
-        <WalletContext.Provider value={{ isConnected, address, connect, disconnect }}>
-            {children}
-        </WalletContext.Provider>
-    );
-};
-
-// eslint-disable-next-line react-refresh/only-export-components
-export const useWallet = () => {
-    const context = useContext(WalletContext);
-    if (context === undefined) {
-        throw new Error('useWallet must be used within a WalletProvider');
+  const checkInstallation = useCallback(async () => {
+    try {
+      const installed = await isConnected();
+      setIsInstalled(!!installed);
+      return !!installed;
+    } catch (e) {
+      console.error("Installation check failed", e);
+      return false;
     }
-    return context;
+  }, []);
+
+  const validateNetwork = useCallback(async () => {
+    try {
+      const currentNetwork = await getNetwork();
+      if (currentNetwork !== networkRef.current) {
+        setNetwork(currentNetwork);
+        networkRef.current = currentNetwork;
+
+        if (currentNetwork && currentNetwork !== "TESTNET" && connected) {
+          showToast("Please switch to Stellar Testnet in Freighter", "warning");
+        }
+      }
+      return currentNetwork;
+    } catch (e) {
+      console.error("Failed to get network", e);
+      return null;
+    }
+  }, [connected, showToast]);
+
+  const updateWalletState = useCallback(async () => {
+    try {
+      const allowed = await isAllowed();
+      if (allowed) {
+        const userInfo = await getUserInfo();
+        if (userInfo?.publicKey) {
+          if (userInfo.publicKey !== addressRef.current) {
+            setAddress(userInfo.publicKey);
+            addressRef.current = userInfo.publicKey;
+            setConnected(true);
+          }
+          await validateNetwork();
+          return true;
+        } else if (addressRef.current) {
+          // Logic for when account becomes inaccessible
+          setAddress(null);
+          addressRef.current = null;
+          setConnected(false);
+          localStorage.removeItem("wallet_connected");
+        }
+      } else if (addressRef.current) {
+        setAddress(null);
+        addressRef.current = null;
+        setConnected(false);
+        localStorage.removeItem("wallet_connected");
+      }
+    } catch (e) {
+      console.error("Failed to update wallet state", e);
+    }
+    return false;
+  }, [validateNetwork]);
+
+  // Initialize and Polling
+  useEffect(() => {
+    const init = async () => {
+      const installed = await checkInstallation();
+      if (installed) {
+        const wasConnected =
+          localStorage.getItem("wallet_connected") === "true";
+        if (wasConnected) {
+          await updateWalletState();
+        }
+      }
+    };
+    init();
+
+    // Polling for changes (Account / Network)
+    const interval = setInterval(async () => {
+      if (await isConnected()) {
+        await updateWalletState();
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [checkInstallation, updateWalletState]);
+
+  const connect = async () => {
+    if (!isInstalled) {
+      const installed = await checkInstallation();
+      if (!installed) {
+        showToast("Freighter wallet not found. Please install it.", "error");
+        window.open("https://www.freighter.app/", "_blank");
+        return;
+      }
+    }
+
+    try {
+      const allowed = await setAllowed();
+      if (allowed) {
+        const success = await updateWalletState();
+        if (success) {
+          localStorage.setItem("wallet_connected", "true");
+          showToast("Wallet connected successfully!", "success");
+
+          const net = await getNetwork();
+          if (net !== "TESTNET") {
+            showToast("Application works best on Testnet", "warning");
+          }
+        }
+      } else {
+        showToast("Connection request rejected", "error");
+      }
+    } catch (e: unknown) {
+      console.error("Failed to connect wallet", e);
+      const errorMessage =
+        e instanceof Error ? e.message : "Failed to connect wallet";
+      showToast(errorMessage, "error");
+    }
+  };
+
+  const disconnect = async () => {
+    setConnected(false);
+    setAddress(null);
+    setNetwork(null);
+    addressRef.current = null;
+    networkRef.current = null;
+    localStorage.removeItem("wallet_connected");
+    showToast("Wallet disconnected", "info");
+  };
+
+  return (
+    <WalletContext.Provider
+      value={{
+        isConnected: connected,
+        isInstalled,
+        address,
+        network,
+        connect,
+        disconnect,
+      }}
+    >
+      {children}
+      {toast && (
+        <Toast message={toast.message} type={toast.type} onClose={clearToast} />
+      )}
+    </WalletContext.Provider>
+  );
 };
+
+export { useWallet } from '../hooks/useWallet';
