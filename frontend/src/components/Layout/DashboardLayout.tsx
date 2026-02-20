@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, FileText, Settings, Wallet, Menu, X, BarChart3 } from 'lucide-react';
+import { LayoutDashboard, FileText, Settings, Wallet, Menu, X, Activity as ActivityIcon, BarChart3 } from 'lucide-react';
 import { useWallet } from '../../context/WalletContext';
 
 const DashboardLayout: React.FC = () => {
@@ -15,6 +15,7 @@ const DashboardLayout: React.FC = () => {
     const navItems = [
         { label: 'Overview', path: '/dashboard', icon: LayoutDashboard },
         { label: 'Proposals', path: '/dashboard/proposals', icon: FileText },
+        { label: 'Activity', path: '/dashboard/activity', icon: ActivityIcon },
         { label: 'Analytics', path: '/dashboard/analytics', icon: BarChart3 },
         { label: 'Settings', path: '/dashboard/settings', icon: Settings },
     ];
@@ -49,10 +50,11 @@ const DashboardLayout: React.FC = () => {
                             <Link
                                 key={item.path}
                                 to={item.path}
-                                className={`flex items-center px-4 py-3 rounded-lg transition-colors ${isActive
+                                className={`flex items-center px-4 py-3 rounded-lg transition-colors ${
+                                    isActive
                                         ? 'bg-purple-600 text-white'
                                         : 'text-gray-400 hover:bg-gray-700 hover:text-white'
-                                    }`}
+                                }`}
                                 onClick={() => setIsSidebarOpen(false)}
                             >
                                 <Icon size={20} className="mr-3" />
