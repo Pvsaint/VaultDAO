@@ -6,6 +6,7 @@ import Activity from './app/dashboard/Activity';
 import Analytics from './app/dashboard/Analytics';
 import Settings from './app/dashboard/Settings';
 import Templates from './app/dashboard/Templates';
+import ToastDemo from './components/ToastDemo';
 
 function App() {
   return (
@@ -21,6 +22,9 @@ function App() {
           <Route path="analytics" element={<Analytics />} />
           <Route path="settings" element={<Settings />} />
         </Route>
+
+        {/* Toast Demo Route */}
+        {/* <Route path="/toast-demo" element={<ToastDemo />} /> */}
       </Routes>
     </Router>
   );
