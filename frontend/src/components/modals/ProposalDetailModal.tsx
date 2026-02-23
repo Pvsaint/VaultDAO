@@ -227,6 +227,27 @@ const ProposalDetailModal: React.FC<ProposalDetailModalProps> = ({ isOpen, onClo
                             </div>
                         </div>
                     </div>
+
+                    {/* History Section */}
+                    <div className="bg-primary/20 rounded-xl border border-gray-800 overflow-hidden">
+                        <div className="px-4 py-3 border-b border-gray-800 bg-white/5 flex justify-between items-center">
+                            <h4 className="text-[10px] font-black text-white uppercase tracking-widest">Approval History</h4>
+                            <span className="text-[10px] font-bold text-accent bg-accent/10 px-2 py-0.5 rounded">
+                                {proposal.approvals}/{proposal.threshold || 3} Confirmed
+                            </span>
+                        </div>
+                        <div className="divide-y divide-gray-800/50">
+                            {[1, 2].map((_, i) => (
+                                <div key={i} className="px-4 py-3.5 flex justify-between items-center text-xs hover:bg-white/[0.02] transition-colors">
+                                    <div className="flex items-center gap-2.5 overflow-hidden">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0 shadow-[0_0_8px_rgba(34,197,94,0.5)]" />
+                                        <span className="text-gray-300 font-mono truncate tracking-tight">GB2R...4M1P</span>
+                                    </div>
+                                    <span className="text-gray-500 shrink-0 font-medium ml-4 uppercase text-[9px]">Feb 19, 14:20</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>\n                        </>\n                    ) : (\n                        <ProposalComments proposalId={proposal.id} />\n                    )}
                 </div>
 
                 {/* 3. Footer */}
