@@ -54,8 +54,8 @@ export interface Proposal {
 
 const Proposals: React.FC = () => {
   const { notify } = useToast();
-  const { rejectProposal, getTokenBalances, addCustomToken } = useVaultContract();
-  useWallet();
+  const { rejectProposal, approveProposal, getTokenBalances, addCustomToken } = useVaultContract();
+  const { address } = useWallet();
 
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [loading, setLoading] = useState(false);
@@ -87,7 +87,7 @@ const Proposals: React.FC = () => {
     const fetchBalances = async () => {
       try {
         const balances = await getTokenBalances();
-        setTokenBalances(balances.map(b => ({ ...b, isLoading: false })));
+        setTokenBalances(balances.map((b: TokenBalance) => ({ ...b, isLoading: false })));
       } catch (error) {
         console.error('Failed to fetch token balances:', error);
         // Set default tokens with zero balances
@@ -144,6 +144,7 @@ const Proposals: React.FC = () => {
             status: 'Approved',
             approvals: 3,
             threshold: 3,
+            approvedBy: ['0x789...012', '0xaaa...bbb', '0xccc...ddd'],
             createdAt: new Date(Date.now() - 86400000).toISOString()
           },
           {
@@ -157,6 +158,7 @@ const Proposals: React.FC = () => {
             status: 'Executed',
             approvals: 3,
             threshold: 3,
+            approvedBy: ['0x345...678', '0xeee...fff', '0xggg...hhh'],
             createdAt: new Date(Date.now() - 172800000).toISOString()
           }
         ];
@@ -236,7 +238,7 @@ const Proposals: React.FC = () => {
       notify('proposal_rejected', 'Wallet not connected', 'error');
       return;
     }
-    
+
     setApprovingIds(prev => new Set(prev).add(proposalId));
     try {
       await approveProposal(Number(proposalId));
@@ -254,14 +256,18 @@ const Proposals: React.FC = () => {
         return p;
       }));
       notify('proposal_approved', `Proposal #${proposalId} approved successfully`, 'success');
-    } catch (err: any) {
-      notify('proposal_rejected', err.message || 'Failed to approve proposal', 'error');
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to approve proposal';
+      notify('proposal_rejected', errorMessage, 'error');
     } finally {
       setApprovingIds(prev => {
         const newSet = new Set(prev);
         newSet.delete(proposalId);
         return newSet;
       });
+    }
+  };
+
   const handleTokenSelect = (token: TokenInfo) => {
     setNewProposalForm(prev => ({ ...prev, token: token.address }));
     setSelectedToken(token);
@@ -278,7 +284,7 @@ const Proposals: React.FC = () => {
     if (newProposalForm.amount && selectedTokenBalance) {
       const amount = parseFloat(newProposalForm.amount);
       const balance = parseFloat(selectedTokenBalance.balance);
-      
+
       if (isNaN(amount)) {
         return 'Please enter a valid amount';
       } else if (amount <= 0) {
@@ -308,7 +314,7 @@ const Proposals: React.FC = () => {
       if (tokenInfo) {
         // Refresh token balances
         const balances = await getTokenBalances();
-        setTokenBalances(balances.map(b => ({ ...b, isLoading: false })));
+        setTokenBalances(balances.map((b: TokenBalance) => ({ ...b, isLoading: false })));
       }
       return tokenInfo;
     } catch (error) {
@@ -335,7 +341,7 @@ const Proposals: React.FC = () => {
               const isApproving = approvingIds.has(prop.id);
               const hasUserApproved = address ? prop.approvedBy.includes(address) : false;
               const progressPercent = (prop.approvals / prop.threshold) * 100;
-              
+
               return (
                 <div key={prop.id} onClick={() => setSelectedProposal(prop)} className="bg-gray-800/50 p-5 rounded-2xl border border-gray-700 hover:border-purple-500/50 cursor-pointer transition-all hover:scale-[1.01] group">
                   <div className="flex flex-col gap-4">
@@ -374,7 +380,7 @@ const Proposals: React.FC = () => {
                               )}
                             </div>
                             <div className="w-full bg-gray-700/30 rounded-full h-2 overflow-hidden">
-                              <div 
+                              <div
                                 className="bg-gradient-to-r from-purple-500 to-purple-600 h-full rounded-full transition-all duration-500"
                                 style={{ width: `${Math.min(progressPercent, 100)}%` }}
                               />
@@ -382,13 +388,12 @@ const Proposals: React.FC = () => {
                             {prop.approvedBy.length > 0 && (
                               <div className="mt-2 flex flex-wrap gap-1">
                                 {prop.approvedBy.map((approver, idx) => (
-                                  <span 
-                                    key={idx} 
-                                    className={`text-xs px-2 py-1 rounded-full ${
-                                      approver === address 
-                                        ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' 
-                                        : 'bg-gray-700/50 text-gray-400'
-                                    }`}
+                                  <span
+                                    key={idx}
+                                    className={`text-xs px-2 py-1 rounded-full ${approver === address
+                                      ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                                      : 'bg-gray-700/50 text-gray-400'
+                                      }`}
                                   >
                                     {approver.slice(0, 6)}...{approver.slice(-4)}
                                   </span>
@@ -398,7 +403,7 @@ const Proposals: React.FC = () => {
                           </div>
                           <div className="flex gap-2 w-full sm:w-auto">
                             {address && !hasUserApproved && (
-                              <button 
+                              <button
                                 onClick={(e) => handleApprove(prop.id, e)}
                                 disabled={isApproving}
                                 className="flex-1 sm:flex-initial bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2"
@@ -422,8 +427,8 @@ const Proposals: React.FC = () => {
                                 Approved
                               </div>
                             )}
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); setRejectingId(prop.id); setShowRejectModal(true); }} 
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setRejectingId(prop.id); setShowRejectModal(true); }}
                               className="flex-1 sm:flex-initial bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
                             >
                               Reject

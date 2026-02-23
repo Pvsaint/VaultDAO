@@ -43,9 +43,9 @@ const RoleManagement: React.FC = () => {
 
   const loadData = async () => {
     try {
-      const role = await getUserRole();
+      const role = await getUserRole("");
       setCurrentUserRole(role);
-      
+
       if (role === 2) {
         const roles = await getAllRoles();
         setRoleAssignments(roles);
@@ -101,7 +101,7 @@ const RoleManagement: React.FC = () => {
   const executeRoleChange = async () => {
     try {
       const { type, address, newRole } = confirmModal;
-      
+
       if (!address) return;
 
       if (type === 'revoke') {
@@ -125,7 +125,7 @@ const RoleManagement: React.FC = () => {
     }
   };
 
-  const filteredAssignments = roleAssignments.filter(r => 
+  const filteredAssignments = roleAssignments.filter(r =>
     r.address.toLowerCase().includes(searchQuery.toLowerCase()) ||
     ROLES[r.role as keyof typeof ROLES]?.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -290,15 +290,15 @@ const RoleManagement: React.FC = () => {
         isOpen={confirmModal.isOpen}
         title={
           confirmModal.type === 'assign' ? 'Assign Role' :
-          confirmModal.type === 'change' ? 'Change Role' :
-          'Revoke Role'
+            confirmModal.type === 'change' ? 'Change Role' :
+              'Revoke Role'
         }
         message={
-          confirmModal.type === 'assign' 
+          confirmModal.type === 'assign'
             ? `Assign ${ROLES[confirmModal.newRole as keyof typeof ROLES]?.name} role to ${confirmModal.address?.slice(0, 8)}...${confirmModal.address?.slice(-8)}?`
             : confirmModal.type === 'change'
-            ? `Change role for ${confirmModal.address?.slice(0, 8)}...${confirmModal.address?.slice(-8)}?`
-            : `Revoke ${ROLES[confirmModal.currentRole as keyof typeof ROLES]?.name} role from ${confirmModal.address?.slice(0, 8)}...${confirmModal.address?.slice(-8)}? This will set their role to Member.`
+              ? `Change role for ${confirmModal.address?.slice(0, 8)}...${confirmModal.address?.slice(-8)}?`
+              : `Revoke ${ROLES[confirmModal.currentRole as keyof typeof ROLES]?.name} role from ${confirmModal.address?.slice(0, 8)}...${confirmModal.address?.slice(-8)}? This will set their role to Member.`
         }
         confirmText={confirmModal.type === 'revoke' ? 'Revoke' : 'Confirm'}
         onConfirm={executeRoleChange}
