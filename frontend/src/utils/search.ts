@@ -108,7 +108,7 @@ export function fuzzySearch<T>(
   });
   const results = fuse.search(q);
   const limit = options?.limit ?? 100;
-  return results.slice(0, limit).map((r) => r.item);
+  return results.slice(0, limit).map((r: { item: T }) => r.item);
 }
 
 /** Highlight search terms in text (case-insensitive, escape HTML) */
