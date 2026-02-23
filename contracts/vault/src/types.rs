@@ -22,6 +22,8 @@ pub struct InitConfig {
     pub timelock_threshold: i128,
     /// Delay in ledgers for timelocked proposals
     pub timelock_delay: u64,
+    /// Threshold strategy configuration
+    pub threshold_strategy: ThresholdStrategy,
 }
 
 /// Vault configuration
@@ -42,6 +44,44 @@ pub struct Config {
     pub timelock_threshold: i128,
     /// Delay in ledgers for timelocked proposals
     pub timelock_delay: u64,
+    /// Threshold strategy configuration
+    pub threshold_strategy: ThresholdStrategy,
+}
+
+/// Threshold strategy for dynamic approval requirements
+#[contracttype]
+#[derive(Clone, Debug)]
+pub enum ThresholdStrategy {
+    /// Fixed threshold (original behavior)
+    Fixed,
+    /// Percentage-based: threshold = ceil(signers * percentage / 100)
+    Percentage(u32),
+    /// Amount-based tiers: (amount_threshold, required_approvals)
+    AmountBased(Vec<AmountTier>),
+    /// Time-based: threshold reduces after time passes
+    TimeBased(TimeBasedThreshold),
+}
+
+/// Amount-based threshold tier
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct AmountTier {
+    /// Amount threshold for this tier
+    pub amount: i128,
+    /// Required approvals for this tier
+    pub approvals: u32,
+}
+
+/// Time-based threshold configuration
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct TimeBasedThreshold {
+    /// Initial threshold
+    pub initial_threshold: u32,
+    /// Reduced threshold after delay
+    pub reduced_threshold: u32,
+    /// Ledgers to wait before reduction
+    pub reduction_delay: u64,
 }
 
 /// Permissions assigned to vault participants.
@@ -85,6 +125,33 @@ pub enum ProposalStatus {
     Expired = 4,
 }
 
+/// Execution condition types
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Condition {
+    /// Execute only if vault balance is above threshold
+    BalanceAbove(i128),
+    /// Execute only if vault balance is below threshold
+    BalanceBelow(i128),
+    /// Execute only after specific ledger
+    DateAfter(u64),
+    /// Execute only before specific ledger
+    DateBefore(u64),
+    /// Custom condition (reserved for future use)
+    Custom(Symbol),
+}
+
+/// Logic operator for combining multiple conditions
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum ConditionLogic {
+    /// All conditions must be met
+    And = 0,
+    /// At least one condition must be met
+    Or = 1,
+}
+
 /// Transfer proposal
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -109,12 +176,18 @@ pub struct Proposal {
     pub status: ProposalStatus,
     /// Priority level
     pub priority: Priority,
+    /// IPFS hashes for attachments (invoices, receipts, documents)
+    pub attachments: Vec<soroban_sdk::String>,
     /// Ledger sequence when created
     pub created_at: u64,
     /// Ledger sequence when proposal expires
     pub expires_at: u64,
     /// Earliest ledger sequence when proposal can be executed (0 if no timelock)
     pub unlock_ledger: u64,
+    /// Execution conditions (empty = no conditions)
+    pub conditions: Vec<Condition>,
+    /// Logic for combining conditions (default: And)
+    pub condition_logic: ConditionLogic,
 }
 
 /// Recurring payment schedule
