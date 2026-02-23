@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { LayoutDashboard, FileText, CheckCircle, Wallet, Loader2, Plus, TrendingUp, TrendingDown, X } from 'lucide-react';
+import { LayoutDashboard, FileText, CheckCircle, Wallet, Loader2, Plus, TrendingUp, TrendingDown, X, RefreshCw } from 'lucide-react';
 import StatCard from '../../components/Layout/StatCard';
 import TokenBalanceCard, { type TokenBalance } from '../../components/TokenBalanceCard';
 import { useVaultContract } from '../../hooks/useVaultContract';
@@ -24,7 +24,7 @@ interface PortfolioValue {
 }
 
 const Overview: React.FC = () => {
-    const { getDashboardStats, getTokenBalances, getPortfolioValue, addCustomToken, loading } = useVaultContract();
+    const { getDashboardStats, getTokenBalances, getPortfolioValue, addCustomToken, getVaultBalance, loading } = useVaultContract();
     const [stats, setStats] = useState<DashboardStats | null>(null);
     const [tokenBalances, setTokenBalances] = useState<TokenBalance[]>([]);
     const [portfolioValue, setPortfolioValue] = useState<PortfolioValue | null>(null);
@@ -34,6 +34,10 @@ const Overview: React.FC = () => {
     const [isAddingToken, setIsAddingToken] = useState(false);
     const [addError, setAddError] = useState<string | null>(null);
     const [isLoadingBalances, setIsLoadingBalances] = useState(true);
+    const [balance, setBalance] = useState<string>('0');
+    const [balanceLoading, setBalanceLoading] = useState(false);
+    const [balanceError, setBalanceError] = useState<string | null>(null);
+    const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
     const quickActionTemplates = (() => {
         const mostUsed = getMostUsedTemplates(3);

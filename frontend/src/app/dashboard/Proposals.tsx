@@ -11,7 +11,7 @@ import { useToast } from '../../hooks/useToast';
 import { useVaultContract } from '../../hooks/useVaultContract';
 import type { TokenBalance } from '../../components/TokenBalanceCard';
 import type { TokenInfo } from '../../constants/tokens';
-import { DEFAULT_TOKENS, getTokenIcon, formatTokenBalance } from '../../constants/tokens';
+import { DEFAULT_TOKENS, formatTokenBalance } from '../../constants/tokens';
 import { useWallet } from '../../context/WalletContextProps';
 
 const CopyButton = ({ text }: { text: string }) => (
@@ -37,17 +37,6 @@ const StatusBadge = ({ status }: { status: string }) => {
   );
 };
 
-// Token badge for proposal cards
-const TokenBadge = ({ tokenSymbol }: { tokenSymbol: string }) => {
-  const icon = getTokenIcon(tokenSymbol);
-  return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-700 text-xs text-gray-300">
-      <span>{icon}</span>
-      <span>{tokenSymbol}</span>
-    </span>
-  );
-};
-
 export interface Proposal {
   id: string;
   proposer: string;
@@ -64,8 +53,8 @@ export interface Proposal {
 
 const Proposals: React.FC = () => {
   const { notify } = useToast();
-  const { rejectProposal, getTokenBalances, addCustomToken ,loading: contractLoading, proposeTransfer} = useVaultContract();
-  const { isConnected, address } = useWallet();
+  const { rejectProposal, getTokenBalances, addCustomToken } = useVaultContract();
+  useWallet();
 
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [loading, setLoading] = useState(false);
@@ -74,10 +63,6 @@ const Proposals: React.FC = () => {
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [tokenBalances, setTokenBalances] = useState<TokenBalance[]>([]);
-  const [selectedTokenFilter, setSelectedTokenFilter] = useState<string>('all');
-  const [showTokenFilterDropdown, setShowTokenFilterDropdown] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [activeFilters, setActiveFilters] = useState<FilterState>({
     search: '',
@@ -113,12 +98,6 @@ const Proposals: React.FC = () => {
     };
     fetchBalances();
   }, [getTokenBalances]);
-
-  // Get unique tokens from proposals for filtering
-  const availableTokens = useMemo(() => {
-    const tokens = new Set(proposals.map(p => p.tokenSymbol || p.token));
-    return ['all', ...Array.from(tokens)];
-  }, [proposals]);
 
   useEffect(() => {
     const fetchProposals = async () => {
@@ -178,10 +157,6 @@ const Proposals: React.FC = () => {
   // Filter proposals by token and other filters
   const filteredProposals = useMemo(() => {
     const filtered = proposals.filter((p) => {
-      // Token filter
-      const matchesToken = selectedTokenFilter === 'all' || 
-        (p.tokenSymbol || p.token) === selectedTokenFilter;
-
       // Search filter
       const searchLower = activeFilters.search.toLowerCase();
       const matchesSearch =
@@ -206,7 +181,7 @@ const Proposals: React.FC = () => {
       const to = activeFilters.dateRange.to ? new Date(activeFilters.dateRange.to).setHours(23, 59, 59, 999) : Infinity;
       const matchesDate = proposalDate >= from && proposalDate <= to;
 
-      return matchesToken && matchesSearch && matchesStatus && matchesAmount && matchesDate;
+      return matchesSearch && matchesStatus && matchesAmount && matchesDate;
     });
 
     return [...filtered].sort((a, b) => {
@@ -222,7 +197,7 @@ const Proposals: React.FC = () => {
         default: return dateB - dateA;
       }
     });
-  }, [proposals, activeFilters, selectedTokenFilter]);
+  }, [proposals, activeFilters]);
 
   const handleRejectConfirm = async () => {
     if (!rejectingId) return;
@@ -349,8 +324,13 @@ const Proposals: React.FC = () => {
         <NewProposalModal
           isOpen={showNewProposalModal}
           loading={loading}
-          selectedTemplateName={null} // Added required prop
+          selectedTemplateName={null}
           formData={newProposalForm}
+          tokenBalances={tokenBalances}
+          selectedToken={selectedToken}
+          amountError={amountError}
+          onTokenSelect={handleTokenSelect}
+          onAddCustomToken={handleAddCustomToken}
           onFieldChange={(f, v) => setNewProposalForm(prev => ({ ...prev, [f]: v }))}
           onSubmit={(e) => { e.preventDefault(); setShowNewProposalModal(false); }}
           onOpenTemplateSelector={() => { }}
