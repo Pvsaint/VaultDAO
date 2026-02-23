@@ -94,6 +94,31 @@
                     },
                     {
                       "key": {
+                        "symbol": "velocity_limit"
+                      },
+                      "val": {
+                        "map": [
+                          {
+                            "key": {
+                              "symbol": "limit"
+                            },
+                            "val": {
+                              "u32": 100
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "window"
+                            },
+                            "val": {
+                              "u64": 3600
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "weekly_limit"
                       },
                       "val": {
@@ -273,6 +298,31 @@
                                   "hi": 0,
                                   "lo": 500
                                 }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "velocity_limit"
+                              },
+                              "val": {
+                                "map": [
+                                  {
+                                    "key": {
+                                      "symbol": "limit"
+                                    },
+                                    "val": {
+                                      "u32": 100
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "window"
+                                    },
+                                    "val": {
+                                      "u64": 3600
+                                    }
+                                  }
+                                ]
                               }
                             },
                             {

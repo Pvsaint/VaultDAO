@@ -167,6 +167,7 @@ impl VaultDAO {
             weekly_limit: config.weekly_limit,
             timelock_threshold: config.timelock_threshold,
             timelock_delay: config.timelock_delay,
+            velocity_limit: config.velocity_limit,
             threshold_strategy: config.threshold_strategy,
         };
 
@@ -214,47 +215,53 @@ impl VaultDAO {
         conditions: Vec<types::Condition>,
         condition_logic: types::ConditionLogic,
     ) -> Result<u64, VaultError> {
-        // Verify identity
+        // 1. Verify identity
         proposer.require_auth();
 
-        // Check initialization
+        // 2. Check initialization and load config
         let config = storage::get_config(&env)?;
 
-        // Check role
+        // 3. Check role
         let role = storage::get_role(&env, &proposer);
         if role != Role::Treasurer && role != Role::Admin {
             return Err(VaultError::InsufficientRole);
         }
 
-        // Validate amount
+        // 4. NEW: Velocity Limit Check (Sliding Window)
+        // This prevents automated scripts from spamming proposals.
+        if !storage::check_and_update_velocity(&env, &proposer, &config.velocity_limit) {
+            return Err(VaultError::VelocityLimitExceeded);
+        }
+
+        // 5. Validate amount
         if amount <= 0 {
             return Err(VaultError::InvalidAmount);
         }
 
-        // Check per-proposal spending limit
+        // 6. Check per-proposal spending limit
         if amount > config.spending_limit {
             return Err(VaultError::ExceedsProposalLimit);
         }
 
-        // Check daily aggregate limit
+        // 7. Check daily aggregate limit
         let today = storage::get_day_number(&env);
         let spent_today = storage::get_daily_spent(&env, today);
         if spent_today + amount > config.daily_limit {
             return Err(VaultError::ExceedsDailyLimit);
         }
 
-        // Check weekly aggregate limit
+        // 8. Check weekly aggregate limit
         let week = storage::get_week_number(&env);
         let spent_week = storage::get_weekly_spent(&env, week);
         if spent_week + amount > config.weekly_limit {
             return Err(VaultError::ExceedsWeeklyLimit);
         }
 
-        // Reserve spending (will be confirmed on execution)
+        // 9. Reserve spending (confirmed on execution)
         storage::add_daily_spent(&env, today, amount);
         storage::add_weekly_spent(&env, week, amount);
 
-        // Create proposal
+        // 10. Create and store the proposal
         let proposal_id = storage::increment_proposal_id(&env);
         let current_ledger = env.ledger().sequence() as u64;
 
@@ -279,9 +286,11 @@ impl VaultDAO {
 
         storage::set_proposal(&env, &proposal);
         storage::add_to_priority_queue(&env, priority as u32, proposal_id);
+
+        // Extend TTL to ensure persistent data stays alive
         storage::extend_instance_ttl(&env);
 
-        // Emit event
+        // 11. Emit event
         events::emit_proposal_created(&env, proposal_id, &proposer, &recipient, amount);
 
         Ok(proposal_id)

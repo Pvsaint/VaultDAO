@@ -22,6 +22,7 @@ pub struct InitConfig {
     pub timelock_threshold: i128,
     /// Delay in ledgers for timelocked proposals
     pub timelock_delay: u64,
+    pub velocity_limit: VelocityConfig,
     /// Threshold strategy configuration
     pub threshold_strategy: ThresholdStrategy,
 }
@@ -44,6 +45,7 @@ pub struct Config {
     pub timelock_threshold: i128,
     /// Delay in ledgers for timelocked proposals
     pub timelock_delay: u64,
+    pub velocity_limit: VelocityConfig,
     /// Threshold strategy configuration
     pub threshold_strategy: ThresholdStrategy,
 }
@@ -208,4 +210,14 @@ pub struct RecurringPayment {
     pub payment_count: u32,
     /// Configured status (Active/Stopped)
     pub is_active: bool,
+}
+
+// Add this new struct to types.rs
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct VelocityConfig {
+    /// Maximum number of transfers allowed in the window
+    pub limit: u32,
+    /// The time window in seconds (e.g., 3600 for 1 hour)
+    pub window: u64,
 }
