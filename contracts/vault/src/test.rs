@@ -2,8 +2,8 @@
 
 use super::*;
 use crate::types::{
-    DexConfig, RetryConfig, SwapProposal, TemplateOverrides, TimeBasedThreshold,
-    TransferDetails, VelocityConfig,
+    DexConfig, RetryConfig, SwapProposal, TemplateOverrides, TimeBasedThreshold, TransferDetails,
+    VelocityConfig,
 };
 use crate::{InitConfig, VaultDAO, VaultDAOClient};
 use soroban_sdk::{
@@ -3753,4 +3753,3 @@ fn test_retry_succeeds_after_balance_funded() {
     let result = client.try_execute_proposal(&admin, &proposal_id);
     assert!(result.is_ok(), "Retry should succeed after funding");
 }
-
