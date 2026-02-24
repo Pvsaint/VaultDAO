@@ -3585,9 +3585,9 @@ fn test_retry_backoff_enforced() {
     // First execution — schedules retry
     client.execute_proposal(&admin, &proposal_id);
 
-    // Try again immediately — should fail with RetryBackoffNotElapsed
+    // Try again immediately — should fail with RetryError
     let result = client.try_execute_proposal(&admin, &proposal_id);
-    assert_eq!(result.err(), Some(Ok(VaultError::RetryBackoffNotElapsed)));
+    assert_eq!(result.err(), Some(Ok(VaultError::RetryError)));
 }
 
 #[test]
@@ -3623,7 +3623,7 @@ fn test_retry_max_retries_exhausted() {
         li.sequence_number += 100;
     });
     let result = client.try_execute_proposal(&admin, &proposal_id);
-    assert_eq!(result.err(), Some(Ok(VaultError::MaxRetriesExceeded)));
+    assert_eq!(result.err(), Some(Ok(VaultError::RetryError)));
 }
 
 #[test]
@@ -3818,7 +3818,7 @@ fn test_retry_disabled_rejects_retry_execution() {
 
     // retry_execution should fail when retry is disabled
     let result = client.try_retry_execution(&admin, &1_u64);
-    assert_eq!(result.err(), Some(Ok(VaultError::RetryNotEnabled)));
+    assert_eq!(result.err(), Some(Ok(VaultError::RetryError)));
 }
 
 #[test]
@@ -5501,6 +5501,11 @@ fn test_create_from_template_with_overrides() {
         },
         threshold_strategy: ThresholdStrategy::Fixed,
         default_voting_deadline: 0,
+        retry_config: RetryConfig {
+            enabled: false,
+            max_retries: 0,
+            initial_backoff_ledgers: 0,
+        },
     };
     client.initialize(&admin, &config);
     client.set_role(&admin, &treasurer, &Role::Treasurer);
@@ -5572,6 +5577,11 @@ fn test_create_from_template_amount_out_of_range() {
         },
         threshold_strategy: ThresholdStrategy::Fixed,
         default_voting_deadline: 0,
+        retry_config: RetryConfig {
+            enabled: false,
+            max_retries: 0,
+            initial_backoff_ledgers: 0,
+        },
     };
     client.initialize(&admin, &config);
     client.set_role(&admin, &treasurer, &Role::Treasurer);
@@ -5775,6 +5785,7 @@ fn test_reputation_high_score_get_limits_boost() {
 
     let admin = Address::generate(&env);
     let proposer = Address::generate(&env);
+    let treasurer = Address::generate(&env);
     let signer = Address::generate(&env);
     let recipient = Address::generate(&env);
     let token = Address::generate(&env);
@@ -5798,6 +5809,11 @@ fn test_reputation_high_score_get_limits_boost() {
         },
         threshold_strategy: ThresholdStrategy::Fixed,
         default_voting_deadline: 0,
+        retry_config: RetryConfig {
+            enabled: false,
+            max_retries: 0,
+            initial_backoff_ledgers: 0,
+        },
     };
     client.initialize(&admin, &config);
     client.set_role(&admin, &treasurer, &Role::Treasurer);
@@ -5860,6 +5876,11 @@ fn test_template_not_found() {
         },
         threshold_strategy: ThresholdStrategy::Fixed,
         default_voting_deadline: 0,
+        retry_config: RetryConfig {
+            enabled: false,
+            max_retries: 0,
+            initial_backoff_ledgers: 0,
+        },
     };
     client.initialize(&admin, &config);
 
@@ -5897,6 +5918,11 @@ fn test_retry_not_enabled() {
     let client = VaultDAOClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
+    let proposer = Address::generate(&env);
+    let signer = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token = Address::generate(&env);
+
     let mut signers = Vec::new(&env);
     signers.push_back(admin.clone());
 

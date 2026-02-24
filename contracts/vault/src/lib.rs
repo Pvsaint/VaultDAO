@@ -22,7 +22,8 @@ use types::{
     Comment, Condition, ConditionLogic, Config, CrossVaultConfig, CrossVaultProposal,
     CrossVaultStatus, Dispute, DisputeResolution, DisputeStatus, GasConfig, InsuranceConfig,
     ListMode, NotificationPreferences, Priority, Proposal, ProposalAmendment, ProposalStatus,
-    Reputation, RetryConfig, RetryState, Role, ThresholdStrategy, VaultAction, VaultMetrics,
+    ProposalTemplate, Reputation, RetryConfig, RetryState, Role, TemplateOverrides,
+    ThresholdStrategy, VaultAction, VaultMetrics,
 };
 
 /// The main contract structure for VaultDAO.
@@ -769,11 +770,11 @@ impl VaultDAO {
                 if config.retry_config.enabled
                     && retry_state.retry_count >= config.retry_config.max_retries
                 {
-                    return Err(VaultError::MaxRetriesExceeded);
+                    return Err(VaultError::RetryError);
                 }
                 // Check backoff period
                 if current_ledger < retry_state.next_retry_ledger {
-                    return Err(VaultError::RetryBackoffNotElapsed);
+                    return Err(VaultError::RetryError);
                 }
             }
         }
@@ -856,7 +857,7 @@ impl VaultDAO {
 
         let config = storage::get_config(&env)?;
         if !config.retry_config.enabled {
-            return Err(VaultError::RetryNotEnabled);
+            return Err(VaultError::RetryError);
         }
 
         let retry_state = storage::get_retry_state(&env, proposal_id).unwrap_or(RetryState {
@@ -866,12 +867,12 @@ impl VaultDAO {
         });
 
         if retry_state.retry_count >= config.retry_config.max_retries {
-            return Err(VaultError::MaxRetriesExceeded);
+            return Err(VaultError::RetryError);
         }
 
         let current_ledger = env.ledger().sequence() as u64;
         if retry_state.retry_count > 0 && current_ledger < retry_state.next_retry_ledger {
-            return Err(VaultError::RetryBackoffNotElapsed);
+            return Err(VaultError::RetryError);
         }
 
         // Emit retry attempt event
@@ -2682,7 +2683,7 @@ impl VaultDAO {
         }
 
         // Validate DEX is enabled
-        let dex_config = storage::get_dex_config(&env).ok_or(VaultError::DexError)?;
+        let dex_config = storage::get_dex_config(&env).ok_or(VaultError::DexNotEnabled)?;
 
         // Validate DEX address
         let dex_addr = match &swap_op {
@@ -2695,7 +2696,7 @@ impl VaultDAO {
         };
 
         if !dex_config.enabled_dexs.contains(dex_addr) {
-            return Err(VaultError::DexError);
+            return Err(VaultError::DexNotEnabled);
         }
 
         // Create proposal
@@ -2778,8 +2779,9 @@ impl VaultDAO {
         Self::ensure_dependencies_executable(&env, &proposal)?;
 
         // Get swap operation
-        let swap_op = storage::get_swap_proposal(&env, proposal_id).ok_or(VaultError::DexError)?;
-        let dex_config = storage::get_dex_config(&env).ok_or(VaultError::DexError)?;
+        let swap_op =
+            storage::get_swap_proposal(&env, proposal_id).ok_or(VaultError::DexOperationFailed)?;
+        let dex_config = storage::get_dex_config(&env).ok_or(VaultError::DexOperationFailed)?;
 
         // Execute based on operation type
         let result = match swap_op {
@@ -2869,12 +2871,12 @@ impl VaultDAO {
 
         // Validate slippage
         if expected_out < min_amount_out {
-            return Err(VaultError::DexError);
+            return Err(VaultError::DexOperationFailed);
         }
 
         // Validate price impact
         if price_impact > dex_config.max_price_impact_bps {
-            return Err(VaultError::DexError);
+            return Err(VaultError::DexOperationFailed);
         }
 
         // Execute swap via DEX contract
@@ -2912,7 +2914,7 @@ impl VaultDAO {
         let lp_tokens = (amount_a + amount_b) / 2;
 
         if lp_tokens < min_lp_tokens {
-            return Err(VaultError::DexError);
+            return Err(VaultError::DexOperationFailed);
         }
 
         events::emit_liquidity_added(env, 0, dex, lp_tokens);
@@ -2939,7 +2941,7 @@ impl VaultDAO {
         let token_b_out = amount / 2;
 
         if token_a_out < min_token_a || token_b_out < min_token_b {
-            return Err(VaultError::DexError);
+            return Err(VaultError::DexOperationFailed);
         }
 
         events::emit_liquidity_removed(env, 0, dex, amount);
@@ -3028,7 +3030,7 @@ impl VaultDAO {
         let denominator = reserve_in + amount_in_with_fee;
 
         if denominator == 0 {
-            return Err(VaultError::DexError);
+            return Err(VaultError::DexOperationFailed);
         }
 
         Ok(numerator / denominator)
@@ -3586,6 +3588,117 @@ impl VaultDAO {
         Ok(())
     }
 
+    /// Create a new proposal template
+    ///
+    /// Templates allow pre-approved proposal configurations to be stored on-chain,
+    /// enabling quick creation of common proposals like monthly payroll.
+    ///
+    /// # Arguments
+    /// * `creator` - Address creating the template (must be Admin)
+    /// * `name` - Human-readable template name (must be unique)
+    /// * `description` - Template description
+    /// * `recipient` - Default recipient address
+    /// * `token` - Token contract address
+    /// * `amount` - Default amount
+    /// * `memo` - Default memo/description
+    /// * `min_amount` - Minimum allowed amount (0 = no minimum)
+    /// * `max_amount` - Maximum allowed amount (0 = no maximum)
+    ///
+    /// # Returns
+    /// The unique ID of the newly created template
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_template(
+        env: Env,
+        creator: Address,
+        name: Symbol,
+        description: Symbol,
+        recipient: Address,
+        token: Address,
+        amount: i128,
+        memo: Symbol,
+        min_amount: i128,
+        max_amount: i128,
+    ) -> Result<u64, VaultError> {
+        creator.require_auth();
+
+        // Check role - only Admin can create templates
+        let role = storage::get_role(&env, &creator);
+        if role != Role::Admin {
+            return Err(VaultError::InsufficientRole);
+        }
+
+        // Check if template name already exists
+        if storage::template_name_exists(&env, &name) {
+            return Err(VaultError::AlreadyInitialized); // Reusing error for duplicate name
+        }
+
+        // Validate parameters
+        if !Self::validate_template_params(env.clone(), amount, min_amount, max_amount) {
+            return Err(VaultError::TemplateValidationFailed);
+        }
+
+        // Create template
+        let template_id = storage::increment_template_id(&env);
+        let current_ledger = env.ledger().sequence() as u64;
+
+        let template = ProposalTemplate {
+            id: template_id,
+            name: name.clone(),
+            description,
+            recipient,
+            token,
+            amount,
+            memo,
+            creator: creator.clone(),
+            version: 1,
+            is_active: true,
+            created_at: current_ledger,
+            updated_at: current_ledger,
+            min_amount,
+            max_amount,
+        };
+
+        storage::set_template(&env, &template);
+        storage::set_template_name_mapping(&env, &name, template_id);
+        storage::extend_instance_ttl(&env);
+
+        Ok(template_id)
+    }
+
+    /// Set template active status
+    ///
+    /// Allows admins to activate or deactivate templates.
+    ///
+    /// # Arguments
+    /// * `admin` - Address performing the action (must be Admin)
+    /// * `template_id` - ID of the template to modify
+    /// * `is_active` - New active status
+    pub fn set_template_status(
+        env: Env,
+        admin: Address,
+        template_id: u64,
+        is_active: bool,
+    ) -> Result<(), VaultError> {
+        admin.require_auth();
+
+        // Check role - only Admin can modify templates
+        let role = storage::get_role(&env, &admin);
+        if role != Role::Admin {
+            return Err(VaultError::InsufficientRole);
+        }
+
+        // Get and update template
+        let mut template = storage::get_template(&env, template_id)?;
+        template.is_active = is_active;
+        template.updated_at = env.ledger().sequence() as u64;
+        template.version += 1;
+
+        storage::set_template(&env, &template);
+        storage::extend_instance_ttl(&env);
+
+        Ok(())
+    }
+
     /// Get a template by ID
     ///
     /// # Arguments
@@ -3731,6 +3844,8 @@ impl VaultDAO {
             token: template.token,
             amount,
             memo,
+            metadata: Map::new(&env),
+            tags: Vec::new(&env),
             approvals: Vec::new(&env),
             abstentions: Vec::new(&env),
             attachments: Vec::new(&env),
@@ -3746,6 +3861,7 @@ impl VaultDAO {
             gas_used: 0,
             snapshot_ledger: current_ledger,
             snapshot_signers: config.signers.clone(),
+            depends_on: Vec::new(&env),
             is_swap: false,
             voting_deadline: 0,
         };
@@ -3831,7 +3947,7 @@ impl VaultDAO {
 
         if retry_state.retry_count > retry_config.max_retries {
             events::emit_retries_exhausted(env, proposal_id, retry_state.retry_count);
-            return Err(VaultError::MaxRetriesExceeded);
+            return Err(VaultError::RetryError);
         }
 
         // Exponential backoff: initial_backoff * 2^(retry_count - 1), capped at 2^10
