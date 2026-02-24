@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Outlet, Link, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -17,6 +17,7 @@ import {
   Files,
   RefreshCw,
   AlertCircle,
+  HelpCircle,
 } from "lucide-react";
 // Fixed Import: Pointing to the actual hook location
 import { useWallet } from "../../hooks/useWallet";
@@ -24,26 +25,45 @@ import type { WalletAdapter } from "../../adapters";
 import { WalletSwitcher } from "../WalletSwitcher";
 import CopyButton from '../CopyButton';
 import { LayoutErrorBoundary } from '../ErrorHandler';
+import { OnboardingFlow } from "../OnboardingFlow";
+import { ProductTour } from "../ProductTour";
+import { HelpCenter } from "../HelpCenter";
+import { useOnboarding } from "../../context/OnboardingProvider";
+import { ONBOARDING_CONFIG } from "../../constants/onboarding";
 
 const DashboardLayout: React.FC = () => {
   const { isConnected, address, network, connect, disconnect, availableWallets, selectedWalletId, switchWallet } = useWallet();
+  const { hasCompletedOnboarding, startOnboarding } = useOnboarding();
   const location = useLocation();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
+  const [showOnboardingPrompt, setShowOnboardingPrompt] = useState(false);
+
+  // Auto-show onboarding prompt for new users
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (!hasCompletedOnboarding && isConnected) {
+        setShowOnboardingPrompt(true);
+      }
+    }, ONBOARDING_CONFIG.AUTO_START_DELAY);
+
+    return () => clearTimeout(timer);
+  }, [hasCompletedOnboarding, isConnected]);
 
   const shortenAddress = (addr: string, chars = 4) => {
     return `${addr.slice(0, chars)}...${addr.slice(-chars)}`;
   };
 
   const navItems = [
-    { label: 'Overview', path: '/dashboard', icon: LayoutDashboard },
-    { label: 'Proposals', path: '/dashboard/proposals', icon: FileText },
-    { label: 'Recurring Payments', path: '/dashboard/recurring-payments', icon: RefreshCw },
-    { label: 'Activity', path: '/dashboard/activity', icon: ActivityIcon },
-    { label: 'Templates', path: '/dashboard/templates', icon: Files },
-    { label: 'Analytics', path: '/dashboard/analytics', icon: BarChart3 },
-    { label: 'Error analytics', path: '/dashboard/errors', icon: AlertCircle },
-    { label: 'Settings', path: '/dashboard/settings', icon: Settings },
+    { label: 'Overview', path: '/dashboard', icon: LayoutDashboard, id: 'overview-nav' },
+    { label: 'Proposals', path: '/dashboard/proposals', icon: FileText, id: 'proposals-nav' },
+    { label: 'Recurring Payments', path: '/dashboard/recurring-payments', icon: RefreshCw, id: 'recurring-nav' },
+    { label: 'Activity', path: '/dashboard/activity', icon: ActivityIcon, id: 'activity-nav' },
+    { label: 'Templates', path: '/dashboard/templates', icon: Files, id: 'templates-nav' },
+    { label: 'Analytics', path: '/dashboard/analytics', icon: BarChart3, id: 'analytics-nav' },
+    { label: 'Error analytics', path: '/dashboard/errors', icon: AlertCircle, id: 'errors-nav' },
+    { label: 'Settings', path: '/dashboard/settings', icon: Settings, id: 'settings-nav' },
   ];
 
   return (
@@ -69,7 +89,13 @@ const DashboardLayout: React.FC = () => {
             const Icon = item.icon;
             const isActive = location.pathname === item.path;
             return (
-              <Link key={item.path} to={item.path} className={`flex items-center px-4 py-3 rounded-lg transition-colors ${isActive ? "bg-purple-600 text-white" : "text-gray-400 hover:bg-gray-700 hover:text-white"}`} onClick={() => setIsSidebarOpen(false)}>
+              <Link 
+                key={item.path} 
+                to={item.path} 
+                id={item.id}
+                className={`flex items-center px-4 py-3 rounded-lg transition-colors ${isActive ? "bg-purple-600 text-white" : "text-gray-400 hover:bg-gray-700 hover:text-white"}`} 
+                onClick={() => setIsSidebarOpen(false)}
+              >
                 <Icon size={20} className="mr-3" />
                 <span>{item.label}</span>
               </Link>
@@ -87,6 +113,16 @@ const DashboardLayout: React.FC = () => {
             <p className="text-gray-400 text-sm font-medium">Welcome back to VaultDAO</p>
           </div>
           <div className="flex items-center space-x-4">
+            {/* Help Button */}
+            <button
+              onClick={() => setIsHelpOpen(true)}
+              className="p-2 hover:bg-gray-700/50 rounded-lg transition-colors text-gray-400 hover:text-white"
+              aria-label="Open help center"
+              title="Help Center"
+            >
+              <HelpCircle size={20} />
+            </button>
+
             {isConnected && address ? (
               <div className="relative">
                 <button onClick={() => setIsUserMenuOpen(!isUserMenuOpen)} className="flex items-center space-x-3 bg-gray-800 border border-gray-700 hover:border-purple-500/50 px-3 py-2 md:px-4 rounded-xl transition-all duration-200">
@@ -152,6 +188,40 @@ const DashboardLayout: React.FC = () => {
           </LayoutErrorBoundary>
         </main>
       </div>
+
+      {/* Onboarding Components */}
+      <OnboardingFlow autoStart={showOnboardingPrompt} />
+      <ProductTour autoStart={false} />
+
+      {/* Help Center */}
+      <HelpCenter isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
+
+      {/* Onboarding Prompt for New Users */}
+      {showOnboardingPrompt && !hasCompletedOnboarding && (
+        <div className="fixed bottom-6 right-6 z-40 max-w-sm">
+          <div className="bg-gradient-to-r from-purple-600 to-pink-600 rounded-lg shadow-lg p-4 text-white">
+            <h3 className="font-semibold mb-2">Welcome to VaultDAO!</h3>
+            <p className="text-sm mb-4">Take a quick tour to learn about all the features.</p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  startOnboarding();
+                  setShowOnboardingPrompt(false);
+                }}
+                className="flex-1 bg-white text-purple-600 font-semibold py-2 rounded hover:bg-gray-100 transition-colors"
+              >
+                Start Tour
+              </button>
+              <button
+                onClick={() => setShowOnboardingPrompt(false)}
+                className="flex-1 bg-white/20 hover:bg-white/30 font-semibold py-2 rounded transition-colors"
+              >
+                Later
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
