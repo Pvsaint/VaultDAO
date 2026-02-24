@@ -3359,4 +3359,321 @@ impl VaultDAO {
 
         Ok(())
     }
+
+    // ========================================================================
+    // Escrow System (Issue: feature/escrow-system)
+    // ========================================================================
+
+    /// Create a new escrow agreement with milestone-based fund release
+    ///
+    /// # Arguments
+    /// * `funder` - Address funding the escrow
+    /// * `recipient` - Address receiving funds on completion
+    /// * `token` - Token contract address
+    /// * `amount` - Total escrow amount
+    /// * `milestones` - Milestones defining progressive release
+    /// * `duration_ledgers` - Duration until expiry (full refund after)
+    /// * `arbitrator` - Address for dispute resolution
+    pub fn create_escrow(
+        env: Env,
+        funder: Address,
+        recipient: Address,
+        token_addr: Address,
+        amount: i128,
+        milestones: Vec<types::Milestone>,
+        duration_ledgers: u64,
+        arbitrator: Address,
+    ) -> Result<u64, VaultError> {
+        funder.require_auth();
+
+        // Validate inputs
+        if amount <= 0 {
+            return Err(VaultError::InvalidAmount);
+        }
+
+        if milestones.is_empty() {
+            return Err(VaultError::InvalidAmount);
+        }
+
+        // Validate milestone percentages sum to 100
+        let mut total_pct: u32 = 0;
+        for i in 0..milestones.len() {
+            if let Some(m) = milestones.get(i) {
+                if m.percentage == 0 || m.percentage > 100 {
+                    return Err(VaultError::InvalidAmount);
+                }
+                total_pct = total_pct.saturating_add(m.percentage);
+            }
+        }
+        if total_pct != 100 {
+            return Err(VaultError::InvalidAmount);
+        }
+
+        // Transfer tokens to vault (held in escrow)
+        token::transfer_to_vault(&env, &token_addr, &funder, amount);
+
+        // Create escrow record
+        let escrow_id = storage::increment_escrow_id(&env);
+        let current_ledger = env.ledger().sequence() as u64;
+
+        let escrow = types::Escrow {
+            id: escrow_id,
+            funder: funder.clone(),
+            recipient: recipient.clone(),
+            token: token_addr.clone(),
+            total_amount: amount,
+            released_amount: 0,
+            milestones,
+            status: types::EscrowStatus::Pending,
+            arbitrator,
+            dispute_reason: Symbol::new(&env, ""),
+            created_at: current_ledger,
+            expires_at: current_ledger + duration_ledgers,
+            finalized_at: 0,
+        };
+
+        storage::set_escrow(&env, &escrow);
+        storage::add_funder_escrow(&env, &funder, escrow_id);
+        storage::add_recipient_escrow(&env, &recipient, escrow_id);
+
+        events::emit_escrow_created(
+            &env,
+            escrow_id,
+            &funder,
+            &recipient,
+            &token_addr,
+            amount,
+            duration_ledgers,
+        );
+
+        Ok(escrow_id)
+    }
+
+    /// Mark a milestone as completed and verify conditions are met
+    pub fn complete_milestone(
+        env: Env,
+        completer: Address,
+        escrow_id: u64,
+        milestone_id: u64,
+    ) -> Result<(), VaultError> {
+        completer.require_auth();
+
+        let mut escrow = storage::get_escrow(&env, escrow_id)?;
+        let current_ledger = env.ledger().sequence() as u64;
+
+        // Validate escrow is active
+        if escrow.status != types::EscrowStatus::Pending
+            && escrow.status != types::EscrowStatus::Active
+        {
+            return Err(VaultError::ProposalNotPending);
+        }
+
+        // Validate not expired
+        if current_ledger >= escrow.expires_at {
+            return Err(VaultError::ProposalExpired);
+        }
+
+        // Find and complete milestone
+        let mut found = false;
+        let mut updated_milestones = Vec::new(&env);
+
+        for i in 0..escrow.milestones.len() {
+            if let Some(m) = escrow.milestones.get(i) {
+                if m.id == milestone_id {
+                    if m.is_completed {
+                        return Err(VaultError::AlreadyApproved);
+                    }
+                    if current_ledger < m.release_ledger {
+                        return Err(VaultError::TimelockNotExpired);
+                    }
+
+                    let mut updated_m = m.clone();
+                    updated_m.is_completed = true;
+                    updated_m.completion_ledger = current_ledger;
+                    updated_milestones.push_back(updated_m);
+                    found = true;
+                } else {
+                    updated_milestones.push_back(m.clone());
+                }
+            }
+        }
+
+        if !found {
+            return Err(VaultError::ProposalNotFound);
+        }
+
+        escrow.milestones = updated_milestones;
+
+        // Check if all milestones completed
+        let mut all_complete = true;
+        for i in 0..escrow.milestones.len() {
+            if let Some(m) = escrow.milestones.get(i) {
+                if !m.is_completed {
+                    all_complete = false;
+                    break;
+                }
+            }
+        }
+
+        if all_complete {
+            escrow.status = types::EscrowStatus::MilestonesComplete;
+        } else {
+            escrow.status = types::EscrowStatus::Active;
+        }
+
+        storage::set_escrow(&env, &escrow);
+
+        events::emit_milestone_completed(&env, escrow_id, milestone_id, &completer);
+
+        Ok(())
+    }
+
+    /// Release escrowed funds based on completed milestones
+    pub fn release_escrow_funds(env: Env, escrow_id: u64) -> Result<i128, VaultError> {
+        let mut escrow = storage::get_escrow(&env, escrow_id)?;
+        let current_ledger = env.ledger().sequence() as u64;
+
+        // Only release if all milestones complete or expired
+        let can_release = escrow.status == types::EscrowStatus::MilestonesComplete;
+        let is_expired = current_ledger >= escrow.expires_at;
+
+        if !can_release && !is_expired {
+            return Err(VaultError::ConditionsNotMet);
+        }
+
+        // Calculate amount to release
+        let amount_to_release = if is_expired {
+            // On expiry, return all unreleased to funder
+            escrow.total_amount - escrow.released_amount
+        } else {
+            // Release based on completed milestones
+            escrow.amount_to_release()
+        };
+
+        if amount_to_release <= 0 {
+            return Err(VaultError::ProposalAlreadyExecuted);
+        }
+
+        // Send to recipient if milestones complete, funder if expired
+        let recipient = if is_expired {
+            escrow.funder.clone()
+        } else {
+            escrow.recipient.clone()
+        };
+
+        token::transfer(&env, &escrow.token, &recipient, amount_to_release);
+
+        escrow.released_amount += amount_to_release;
+
+        // Update status
+        if escrow.released_amount >= escrow.total_amount {
+            escrow.status = if is_expired {
+                types::EscrowStatus::Refunded
+            } else {
+                types::EscrowStatus::Released
+            };
+            escrow.finalized_at = current_ledger;
+        }
+
+        storage::set_escrow(&env, &escrow);
+
+        events::emit_escrow_released(&env, escrow_id, &recipient, amount_to_release, is_expired);
+
+        Ok(amount_to_release)
+    }
+
+    /// File a dispute on an escrow agreement
+    pub fn dispute_escrow(
+        env: Env,
+        disputer: Address,
+        escrow_id: u64,
+        reason: Symbol,
+    ) -> Result<(), VaultError> {
+        disputer.require_auth();
+
+        let mut escrow = storage::get_escrow(&env, escrow_id)?;
+
+        // Only funder or recipient can dispute
+        if disputer != escrow.funder && disputer != escrow.recipient {
+            return Err(VaultError::Unauthorized);
+        }
+
+        // Can only dispute active/pending escrows
+        if escrow.status != types::EscrowStatus::Pending
+            && escrow.status != types::EscrowStatus::Active
+            && escrow.status != types::EscrowStatus::MilestonesComplete
+        {
+            return Err(VaultError::ProposalNotPending);
+        }
+
+        escrow.status = types::EscrowStatus::Disputed;
+        escrow.dispute_reason = reason.clone();
+
+        storage::set_escrow(&env, &escrow);
+
+        events::emit_escrow_disputed(&env, escrow_id, &disputer, &reason);
+
+        Ok(())
+    }
+
+    /// Resolve an escrow dispute (arbitrator only)
+    pub fn resolve_escrow_dispute(
+        env: Env,
+        arbitrator: Address,
+        escrow_id: u64,
+        release_to_recipient: bool,
+    ) -> Result<(), VaultError> {
+        arbitrator.require_auth();
+
+        let mut escrow = storage::get_escrow(&env, escrow_id)?;
+
+        if escrow.status != types::EscrowStatus::Disputed {
+            return Err(VaultError::ProposalNotPending);
+        }
+
+        if arbitrator != escrow.arbitrator {
+            return Err(VaultError::Unauthorized);
+        }
+
+        // Release all remaining funds based on arbitrator decision
+        let amount_to_release = escrow.total_amount - escrow.released_amount;
+        if amount_to_release > 0 {
+            let recipient = if release_to_recipient {
+                escrow.recipient.clone()
+            } else {
+                escrow.funder.clone()
+            };
+
+            token::transfer(&env, &escrow.token, &recipient, amount_to_release);
+            escrow.released_amount += amount_to_release;
+        }
+
+        escrow.status = if release_to_recipient {
+            types::EscrowStatus::Released
+        } else {
+            types::EscrowStatus::Refunded
+        };
+        escrow.finalized_at = env.ledger().sequence() as u64;
+
+        storage::set_escrow(&env, &escrow);
+
+        events::emit_escrow_dispute_resolved(&env, escrow_id, &arbitrator, release_to_recipient);
+
+        Ok(())
+    }
+
+    /// Query escrow details
+    pub fn get_escrow_info(env: Env, escrow_id: u64) -> Result<types::Escrow, VaultError> {
+        storage::get_escrow(&env, escrow_id)
+    }
+
+    /// Get all escrows for a funder
+    pub fn get_funder_escrows(env: Env, funder: Address) -> Vec<u64> {
+        storage::get_funder_escrows(&env, &funder)
+    }
+
+    /// Get all escrows for a recipient
+    pub fn get_recipient_escrows(env: Env, recipient: Address) -> Vec<u64> {
+        storage::get_recipient_escrows(&env, &recipient)
+    }
 }

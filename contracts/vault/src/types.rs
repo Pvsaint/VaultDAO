@@ -729,3 +729,99 @@ pub struct Dispute {
     /// Ledger when dispute was resolved (0 if unresolved)
     pub resolved_at: u64,
 }
+// ============================================================================
+// Escrow System (Issue: feature/escrow-system)
+// ============================================================================
+
+/// Status lifecycle of an escrow
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum EscrowStatus {
+    /// Escrow created, awaiting funding
+    Pending = 0,
+    /// Funds locked, milestone phase active
+    Active = 1,
+    /// All milestones completed, funds ready for release
+    MilestonesComplete = 2,
+    /// Funds released to recipient
+    Released = 3,
+    /// Refunded to funder (on failure or dispute)
+    Refunded = 4,
+    /// Disputed, awaiting arbitration
+    Disputed = 5,
+}
+
+/// Milestone tracking unit for progressive fund release
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct Milestone {
+    /// Unique milestone ID
+    pub id: u64,
+    /// Percentage of total escrow amount (0-100)
+    pub percentage: u32,
+    /// Ledger when this milestone can be marked complete
+    pub release_ledger: u64,
+    /// Whether this milestone has been verified as complete
+    pub is_completed: bool,
+    /// Ledger when milestone was completed (0 if not completed)
+    pub completion_ledger: u64,
+}
+
+/// Escrow agreement holding funds with milestone-based releases
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct Escrow {
+    /// Unique escrow ID
+    pub id: u64,
+    /// Address that funded the escrow
+    pub funder: Address,
+    /// Address that receives funds on completion
+    pub recipient: Address,
+    /// Token contract address
+    pub token: Address,
+    /// Total escrow amount (in token's smallest unit)
+    pub total_amount: i128,
+    /// Amount already released
+    pub released_amount: i128,
+    /// Milestones for progressive fund release
+    pub milestones: Vec<Milestone>,
+    /// Current escrow status
+    pub status: EscrowStatus,
+    /// Arbitrator for dispute resolution
+    pub arbitrator: Address,
+    /// Optional dispute details if disputed
+    pub dispute_reason: Symbol,
+    /// Ledger when escrow was created
+    pub created_at: u64,
+    /// Ledger when escrow expires (full refund if not completed)
+    pub expires_at: u64,
+    /// Ledger when escrow was released/refunded (0 if still active)
+    pub finalized_at: u64,
+}
+
+impl Escrow {
+    /// Calculate total percentage from all milestones
+    pub fn total_milestone_percentage(&self) -> u32 {
+        let mut total: u32 = 0;
+        for i in 0..self.milestones.len() {
+            if let Some(m) = self.milestones.get(i) {
+                total = total.saturating_add(m.percentage);
+            }
+        }
+        total
+    }
+
+    /// Calculate amount available for immediate release
+    pub fn amount_to_release(&self) -> i128 {
+        let mut completed_percentage: u32 = 0;
+        for i in 0..self.milestones.len() {
+            if let Some(m) = self.milestones.get(i) {
+                if m.is_completed {
+                    completed_percentage = completed_percentage.saturating_add(m.percentage);
+                }
+            }
+        }
+        (self.total_amount * completed_percentage as i128) / 100 - self.released_amount
+    }
+}

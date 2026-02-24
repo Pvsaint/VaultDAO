@@ -6,9 +6,9 @@ use soroban_sdk::{contracttype, Address, Env, String, Vec};
 
 use crate::errors::VaultError;
 use crate::types::{
-    Comment, Config, CrossVaultConfig, CrossVaultProposal, Dispute, GasConfig, InsuranceConfig,
-    ListMode, NotificationPreferences, Proposal, Reputation, RetryState, Role, VaultMetrics,
-    VelocityConfig,
+    Comment, Config, CrossVaultConfig, CrossVaultProposal, Dispute, Escrow, GasConfig,
+    InsuranceConfig, ListMode, NotificationPreferences, Proposal, Reputation, RetryState, Role,
+    VaultMetrics, VelocityConfig,
 };
 
 /// Storage key definitions
@@ -85,6 +85,14 @@ pub enum DataKey {
     NextDisputeId,
     /// Arbitrator addresses -> Vec<Address>
     Arbitrators,
+    /// Escrow agreement by ID -> Escrow
+    Escrow(u64),
+    /// Next escrow ID counter -> u64
+    NextEscrowId,
+    /// Escrow IDs by funder address -> Vec<u64>
+    FunderEscrows(Address),
+    /// Escrow IDs by recipient address -> Vec<u64>
+    RecipientEscrows(Address),
 }
 
 /// TTL constants (in ledgers, ~5 seconds each)
@@ -837,4 +845,71 @@ pub fn set_proposal_dispute(env: &Env, proposal_id: u64, dispute_id: u64) {
     env.storage()
         .persistent()
         .extend_ttl(&key, PROPOSAL_TTL / 2, PROPOSAL_TTL);
+}
+// ============================================================================
+// Escrow (Issue: feature/escrow-system)
+// ============================================================================
+
+pub fn get_next_escrow_id(env: &Env) -> u64 {
+    env.storage()
+        .instance()
+        .get(&DataKey::NextEscrowId)
+        .unwrap_or(1)
+}
+
+pub fn increment_escrow_id(env: &Env) -> u64 {
+    let id = get_next_escrow_id(env);
+    env.storage()
+        .instance()
+        .set(&DataKey::NextEscrowId, &(id + 1));
+    id
+}
+
+pub fn get_escrow(env: &Env, id: u64) -> Result<Escrow, VaultError> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::Escrow(id))
+        .ok_or(VaultError::ProposalNotFound)
+}
+
+pub fn set_escrow(env: &Env, escrow: &Escrow) {
+    let key = DataKey::Escrow(escrow.id);
+    env.storage().persistent().set(&key, escrow);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PROPOSAL_TTL / 2, PROPOSAL_TTL);
+}
+
+pub fn get_funder_escrows(env: &Env, funder: &Address) -> Vec<u64> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::FunderEscrows(funder.clone()))
+        .unwrap_or_else(|| Vec::new(env))
+}
+
+pub fn add_funder_escrow(env: &Env, funder: &Address, escrow_id: u64) {
+    let mut escrows = get_funder_escrows(env, funder);
+    escrows.push_back(escrow_id);
+    let key = DataKey::FunderEscrows(funder.clone());
+    env.storage().persistent().set(&key, &escrows);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, INSTANCE_TTL_THRESHOLD, INSTANCE_TTL);
+}
+
+pub fn get_recipient_escrows(env: &Env, recipient: &Address) -> Vec<u64> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::RecipientEscrows(recipient.clone()))
+        .unwrap_or_else(|| Vec::new(env))
+}
+
+pub fn add_recipient_escrow(env: &Env, recipient: &Address, escrow_id: u64) {
+    let mut escrows = get_recipient_escrows(env, recipient);
+    escrows.push_back(escrow_id);
+    let key = DataKey::RecipientEscrows(recipient.clone());
+    env.storage().persistent().set(&key, &escrows);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, INSTANCE_TTL_THRESHOLD, INSTANCE_TTL);
 }

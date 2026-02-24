@@ -517,3 +517,71 @@ pub fn emit_arbitrators_updated(env: &Env, admin: &Address, count: u32) {
         (admin.clone(), count),
     );
 }
+// ============================================================================
+// Escrow Events (feature/escrow-system)
+// ============================================================================
+
+/// Emit when an escrow agreement is created
+pub fn emit_escrow_created(
+    env: &Env,
+    escrow_id: u64,
+    funder: &Address,
+    recipient: &Address,
+    token: &Address,
+    amount: i128,
+    duration_ledgers: u64,
+) {
+    env.events().publish(
+        (Symbol::new(env, "escrow_created"), escrow_id),
+        (
+            funder.clone(),
+            recipient.clone(),
+            token.clone(),
+            amount,
+            duration_ledgers,
+        ),
+    );
+}
+
+/// Emit when a milestone is completed
+pub fn emit_milestone_completed(env: &Env, escrow_id: u64, milestone_id: u64, completer: &Address) {
+    env.events().publish(
+        (Symbol::new(env, "milestone_complete"), escrow_id),
+        (milestone_id, completer.clone()),
+    );
+}
+
+/// Emit when escrow funds are released
+pub fn emit_escrow_released(
+    env: &Env,
+    escrow_id: u64,
+    recipient: &Address,
+    amount: i128,
+    is_refund: bool,
+) {
+    env.events().publish(
+        (Symbol::new(env, "escrow_released"), escrow_id),
+        (recipient.clone(), amount, is_refund),
+    );
+}
+
+/// Emit when an escrow is disputed
+pub fn emit_escrow_disputed(env: &Env, escrow_id: u64, disputer: &Address, reason: &Symbol) {
+    env.events().publish(
+        (Symbol::new(env, "escrow_disputed"), escrow_id),
+        (disputer.clone(), reason.clone()),
+    );
+}
+
+/// Emit when an escrow dispute is resolved
+pub fn emit_escrow_dispute_resolved(
+    env: &Env,
+    escrow_id: u64,
+    arbitrator: &Address,
+    released_to_recipient: bool,
+) {
+    env.events().publish(
+        (Symbol::new(env, "escrow_resolved"), escrow_id),
+        (arbitrator.clone(), released_to_recipient),
+    );
+}
