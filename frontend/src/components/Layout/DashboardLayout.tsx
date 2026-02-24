@@ -33,7 +33,7 @@ import { ONBOARDING_CONFIG } from "../../constants/onboarding";
 
 const DashboardLayout: React.FC = () => {
   const { isConnected, address, network, connect, disconnect, availableWallets, selectedWalletId, switchWallet } = useWallet();
-  const { hasCompletedOnboarding, startOnboarding } = useOnboarding();
+  const onboarding = useOnboarding();
   const location = useLocation();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -43,13 +43,13 @@ const DashboardLayout: React.FC = () => {
   // Auto-show onboarding prompt for new users
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (!hasCompletedOnboarding && isConnected) {
+      if (!onboarding.hasCompletedOnboarding && isConnected) {
         setShowOnboardingPrompt(true);
       }
     }, ONBOARDING_CONFIG.AUTO_START_DELAY);
 
     return () => clearTimeout(timer);
-  }, [hasCompletedOnboarding, isConnected]);
+  }, [onboarding.hasCompletedOnboarding, isConnected]);
 
   const shortenAddress = (addr: string, chars = 4) => {
     return `${addr.slice(0, chars)}...${addr.slice(-chars)}`;
@@ -197,7 +197,7 @@ const DashboardLayout: React.FC = () => {
       <HelpCenter isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
 
       {/* Onboarding Prompt for New Users */}
-      {showOnboardingPrompt && !hasCompletedOnboarding && (
+      {showOnboardingPrompt && !onboarding.hasCompletedOnboarding && (
         <div className="fixed bottom-6 right-6 z-40 max-w-sm">
           <div className="bg-gradient-to-r from-purple-600 to-pink-600 rounded-lg shadow-lg p-4 text-white">
             <h3 className="font-semibold mb-2">Welcome to VaultDAO!</h3>
@@ -205,7 +205,7 @@ const DashboardLayout: React.FC = () => {
             <div className="flex gap-2">
               <button
                 onClick={() => {
-                  startOnboarding();
+                  onboarding.startOnboarding();
                   setShowOnboardingPrompt(false);
                 }}
                 className="flex-1 bg-white text-purple-600 font-semibold py-2 rounded hover:bg-gray-100 transition-colors"
