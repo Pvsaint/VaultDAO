@@ -60,9 +60,6 @@ pub enum VaultError {
     AddressAlreadyOnList = 92,
     AddressNotOnList = 93,
 
-    // Comments
-    NotCommentAuthor = 100,
-
     // Insurance
     InsuranceInsufficient = 110,
 
@@ -89,10 +86,8 @@ pub enum VaultError {
     RetryError = 168, // Consolidates MaxRetriesExceeded, RetryBackoffNotElapsed, RetryNotEnabled
 
     // Cross-vault errors
-    XVaultNotEnabled = 170,
+    XVaultNotEnabled = 200,
 
-    // Template errors
-    TemplateNotFound = 171,
-    TemplateInactive = 172,
-    TemplateValidationFailed = 173,
+    // Quorum runtime checks
+    QuorumNotReached = 8,
 }
