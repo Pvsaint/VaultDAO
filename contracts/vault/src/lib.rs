@@ -74,6 +74,10 @@ impl VaultDAO {
         if config.threshold > config.signers.len() {
             return Err(VaultError::ThresholdTooHigh);
         }
+        // Quorum must not exceed total signers (0 means disabled)
+        if config.quorum > config.signers.len() {
+            return Err(VaultError::QuorumTooHigh);
+        }
         if config.spending_limit <= 0 || config.daily_limit <= 0 || config.weekly_limit <= 0 {
             return Err(VaultError::InvalidAmount);
         }
@@ -85,6 +89,7 @@ impl VaultDAO {
         let config_storage = Config {
             signers: config.signers.clone(),
             threshold: config.threshold,
+            quorum: config.quorum,
             spending_limit: config.spending_limit,
             daily_limit: config.daily_limit,
             weekly_limit: config.weekly_limit,
@@ -492,8 +497,11 @@ impl VaultDAO {
     /// Approve a pending proposal.
     ///
     /// Approval requires `require_auth()` from a valid signer.
-    /// When the threshold is reached, the status changes to `Approved`.
+    /// When the threshold is reached AND quorum is satisfied, the status changes to `Approved`.
     /// If the amount exceeds the `timelock_threshold`, an `unlock_ledger` is calculated.
+    ///
+    /// Quorum = approvals + abstentions. The approval threshold is checked only against
+    /// explicit approvals. Both must be satisfied to transition to `Approved`.
     ///
     /// # Arguments
     /// * `signer` - The authorized address providing approval.
@@ -543,9 +551,16 @@ impl VaultDAO {
         // Add approval
         proposal.approvals.push_back(signer.clone());
 
-        // Check if threshold met
+        // Calculate current vote totals
         let approval_count = proposal.approvals.len();
-        if approval_count >= Self::calculate_threshold(&config, &proposal.amount) {
+        let quorum_votes = approval_count + proposal.abstentions.len();
+
+        // Check if threshold met AND quorum satisfied
+        let threshold_reached =
+            approval_count >= Self::calculate_threshold(&config, &proposal.amount);
+        let quorum_reached = config.quorum == 0 || quorum_votes >= config.quorum;
+
+        if threshold_reached && quorum_reached {
             proposal.status = ProposalStatus::Approved;
 
             // Check for Timelock
@@ -994,9 +1009,82 @@ impl VaultDAO {
         Ok(())
     }
 
+    /// Update the quorum requirement.
+    ///
+    /// Quorum is the minimum number of total votes (approvals + abstentions) that must
+    /// be cast before the approval threshold is checked. Set to 0 to disable.
+    ///
+    /// Only Admin can update quorum.
+    pub fn update_quorum(env: Env, admin: Address, quorum: u32) -> Result<(), VaultError> {
+        admin.require_auth();
+
+        let role = storage::get_role(&env, &admin);
+        if role != Role::Admin {
+            return Err(VaultError::Unauthorized);
+        }
+
+        let mut config = storage::get_config(&env)?;
+
+        // Quorum cannot exceed total signers
+        if quorum > config.signers.len() {
+            return Err(VaultError::QuorumTooHigh);
+        }
+
+        config.quorum = quorum;
+        storage::set_config(&env, &config);
+        storage::extend_instance_ttl(&env);
+
+        events::emit_config_updated(&env, &admin);
+
+        Ok(())
+    }
+
     // ========================================================================
     // View Functions
     // ========================================================================
+
+    /// Get proposal by ID
+    pub fn get_proposal(env: Env, proposal_id: u64) -> Result<Proposal, VaultError> {
+        storage::get_proposal(&env, proposal_id)
+    }
+
+    /// Get role for an address
+    pub fn get_role(env: Env, addr: Address) -> Role {
+        storage::get_role(&env, &addr)
+    }
+
+    /// Get daily spending for a given day
+    pub fn get_daily_spent(env: Env, day: u64) -> i128 {
+        storage::get_daily_spent(&env, day)
+    }
+
+    /// Get today's spending
+    pub fn get_today_spent(env: Env) -> i128 {
+        let today = storage::get_day_number(&env);
+        storage::get_daily_spent(&env, today)
+    }
+
+    /// Check if an address is a signer
+    pub fn is_signer(env: Env, addr: Address) -> Result<bool, VaultError> {
+        let config = storage::get_config(&env)?;
+        Ok(config.signers.contains(&addr))
+    }
+
+    /// Returns quorum status for a proposal as (quorum_votes, required_quorum, quorum_reached).
+    ///
+    /// `quorum_votes` = number of approvals + abstentions cast so far.
+    /// `required_quorum` = the vault's configured quorum (0 means disabled).
+    /// `quorum_reached` = whether the quorum requirement is currently satisfied.
+    pub fn get_quorum_status(env: Env, proposal_id: u64) -> Result<(u32, u32, bool), VaultError> {
+        let config = storage::get_config(&env)?;
+        let proposal = storage::get_proposal(&env, proposal_id)?;
+
+        let quorum_votes = proposal.approvals.len() + proposal.abstentions.len();
+        let required_quorum = config.quorum;
+        let quorum_reached = required_quorum == 0 || quorum_votes >= required_quorum;
+
+        Ok((quorum_votes, required_quorum, quorum_reached))
+    }
 
     // ========================================================================
     // Recurring Payments
@@ -1050,8 +1138,6 @@ impl VaultDAO {
         };
 
         storage::set_recurring_payment(&env, &payment);
-
-        // Use a generic event or add a specific one (skipping specific event for brevity/limit)
 
         Ok(id)
     }
@@ -1107,33 +1193,6 @@ impl VaultDAO {
         storage::extend_instance_ttl(&env);
 
         Ok(())
-    }
-
-    /// Get proposal by ID
-    pub fn get_proposal(env: Env, proposal_id: u64) -> Result<Proposal, VaultError> {
-        storage::get_proposal(&env, proposal_id)
-    }
-
-    /// Get role for an address
-    pub fn get_role(env: Env, addr: Address) -> Role {
-        storage::get_role(&env, &addr)
-    }
-
-    /// Get daily spending for a given day
-    pub fn get_daily_spent(env: Env, day: u64) -> i128 {
-        storage::get_daily_spent(&env, day)
-    }
-
-    /// Get today's spending
-    pub fn get_today_spent(env: Env) -> i128 {
-        let today = storage::get_day_number(&env);
-        storage::get_daily_spent(&env, today)
-    }
-
-    /// Check if an address is a signer
-    pub fn is_signer(env: Env, addr: Address) -> Result<bool, VaultError> {
-        let config = storage::get_config(&env)?;
-        Ok(config.signers.contains(&addr))
     }
 
     // ========================================================================
@@ -1385,6 +1444,18 @@ impl VaultDAO {
     // ========================================================================
 
     /// Record an explicit abstention on a pending proposal.
+    ///
+    /// Abstentions count toward quorum (total participation) but are NOT counted
+    /// toward the approval threshold. This allows a signer with a conflict of
+    /// interest to participate in governance without influencing the outcome.
+    ///
+    /// After recording the abstention, this function checks whether both the
+    /// approval threshold AND quorum are now satisfied (since an abstention can
+    /// push the quorum over the line while existing approvals hit the threshold).
+    ///
+    /// # Arguments
+    /// * `signer` - The signer recording the abstention (must authorize).
+    /// * `proposal_id` - ID of the proposal to abstain from.
     pub fn abstain_from_proposal(
         env: Env,
         signer: Address,
@@ -1415,13 +1486,40 @@ impl VaultDAO {
             return Err(VaultError::ProposalExpired);
         }
 
+        // Prevent voting twice (approving then abstaining, or abstaining twice)
         if proposal.approvals.contains(&signer) || proposal.abstentions.contains(&signer) {
             return Err(VaultError::AlreadyApproved);
         }
 
+        // Record the abstention
         proposal.abstentions.push_back(signer.clone());
+
+        let abstention_count = proposal.abstentions.len();
+        let quorum_votes = proposal.approvals.len() + abstention_count;
+
+        // An abstention may push quorum over the line while approvals already meet threshold.
+        // Check both conditions and transition to Approved if they are now both satisfied.
+        let threshold_reached =
+            proposal.approvals.len() >= Self::calculate_threshold(&config, &proposal.amount);
+        let quorum_reached = config.quorum == 0 || quorum_votes >= config.quorum;
+
+        if threshold_reached && quorum_reached {
+            proposal.status = ProposalStatus::Approved;
+
+            if proposal.amount >= config.timelock_threshold {
+                proposal.unlock_ledger = current_ledger + config.timelock_delay;
+            } else {
+                proposal.unlock_ledger = 0;
+            }
+
+            events::emit_proposal_ready(&env, proposal_id, proposal.unlock_ledger);
+        }
+
         storage::set_proposal(&env, &proposal);
         storage::extend_instance_ttl(&env);
+
+        // Emit dedicated abstention event
+        events::emit_proposal_abstained(&env, proposal_id, &signer, abstention_count, quorum_votes);
 
         Ok(())
     }

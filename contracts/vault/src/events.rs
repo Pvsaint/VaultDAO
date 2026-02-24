@@ -48,6 +48,26 @@ pub fn emit_proposal_approved(
     );
 }
 
+/// Emit when a signer explicitly abstains from a proposal.
+///
+/// # Arguments
+/// * `proposal_id` - The proposal being abstained from.
+/// * `abstainer` - The signer recording an abstention.
+/// * `abstention_count` - Total abstentions recorded so far (after this one).
+/// * `quorum_votes` - Combined approvals + abstentions after this vote (quorum progress).
+pub fn emit_proposal_abstained(
+    env: &Env,
+    proposal_id: u64,
+    abstainer: &Address,
+    abstention_count: u32,
+    quorum_votes: u32,
+) {
+    env.events().publish(
+        (Symbol::new(env, "proposal_abstained"), proposal_id),
+        (abstainer.clone(), abstention_count, quorum_votes),
+    );
+}
+
 /// Emit when a proposal reaches threshold and is ready for execution
 pub fn emit_proposal_ready(env: &Env, proposal_id: u64, unlock_ledger: u64) {
     env.events().publish(
@@ -83,7 +103,7 @@ pub fn emit_proposal_rejected(env: &Env, proposal_id: u64, rejector: &Address, p
     env.events().publish(
         (Symbol::new(env, "proposal_rejected"), proposal_id),
         (rejector.clone(), proposer.clone()),
-    ); // <-- semicolon added
+    );
 }
 
 /// Emit when a proposal is cancelled with a refund

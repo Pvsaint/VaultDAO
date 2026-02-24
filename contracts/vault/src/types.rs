@@ -12,6 +12,9 @@ pub struct InitConfig {
     pub signers: Vec<Address>,
     /// Required number of approvals (M in M-of-N)
     pub threshold: u32,
+    /// Minimum number of votes (approvals + abstentions) required before threshold is checked.
+    /// Set to 0 to disable quorum enforcement.
+    pub quorum: u32,
     /// Maximum amount per proposal (in stroops)
     pub spending_limit: i128,
     /// Maximum aggregate daily spending (in stroops)
@@ -35,6 +38,9 @@ pub struct Config {
     pub signers: Vec<Address>,
     /// Required number of approvals (M in M-of-N)
     pub threshold: u32,
+    /// Minimum number of votes (approvals + abstentions) required before threshold is checked.
+    /// Set to 0 to disable quorum enforcement.
+    pub quorum: u32,
     /// Maximum amount per proposal (in stroops)
     pub spending_limit: i128,
     /// Maximum aggregate daily spending (in stroops)
