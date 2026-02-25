@@ -5879,6 +5879,264 @@ fn test_reputation_high_score_get_limits_boost() {
 #[test]
 #[ignore] // Escrow test - system working but complex initialization in test environment
 fn test_escrow_basic_flow() {
-    // Test that escrow types and functions compile correctly
     // Full integration tested in production deploy
+}
+
+#[test]
+fn test_insurance_posting_and_refund() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(VaultDAO, ());
+    let client = VaultDAOClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let proposer = Address::generate(&env);
+    let signer2 = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    
+    let token_admin = Address::generate(&env);
+    let sac = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_addr = sac.address();
+    let sac_admin_client = StellarAssetClient::new(&env, &token_addr);
+
+    let mut signers = Vec::new(&env);
+    signers.push_back(admin.clone());
+    signers.push_back(proposer.clone());
+    signers.push_back(signer2.clone());
+
+    let config = InitConfig {
+        signers,
+        threshold: 2,
+        quorum: 0,
+        spending_limit: 1000,
+        daily_limit: 5000,
+        weekly_limit: 10000,
+        timelock_threshold: 5000,
+        timelock_delay: 100,
+        velocity_limit: VelocityConfig { limit: 1000, window: 3600 },
+        threshold_strategy: ThresholdStrategy::Fixed,
+        default_voting_deadline: 0,
+        retry_config: RetryConfig {
+            enabled: false,
+            max_retries: 0,
+            initial_backoff_ledgers: 0,
+        },
+    };
+    client.initialize(&admin, &config);
+    client.set_role(&admin, &proposer, &Role::Treasurer);
+    client.set_role(&admin, &signer2, &Role::Treasurer);
+
+    // Fund vault and proposer
+    sac_admin_client.mint(&contract_id, &5000); // For the transfer itself
+    sac_admin_client.mint(&proposer, &1000);    // For proposing (insurance)
+
+    // Enable insurance: minimum 100 tokens, or 5% (500 bps)
+    let ins_config = InsuranceConfig {
+        enabled: true,
+        min_amount: 100,
+        min_insurance_bps: 500, // 5%
+        slash_percentage: 50,
+    };
+    client.set_insurance_config(&admin, &ins_config);
+
+    let token_client = soroban_sdk::token::Client::new(&env, &token_addr);
+    assert_eq!(token_client.balance(&proposer), 1000);
+
+    // Create proposal: transfer 1000 tokens.
+    // 5% of 1000 is 50 tokens required for insurance. We'll send exactly 50.
+    let proposal_id = client.propose_transfer(
+        &proposer,
+        &recipient,
+        &token_addr,
+        &1000,
+        &Symbol::new(&env, "insured"),
+        &Priority::Normal,
+        &Vec::new(&env),
+        &ConditionLogic::And,
+        &50,
+    );
+
+    // Proposer balance should drop by 50 (locked in vault)
+    assert_eq!(token_client.balance(&proposer), 950);
+
+    // Approve the proposal
+    client.approve_proposal(&proposer, &proposal_id);
+    client.approve_proposal(&signer2, &proposal_id);
+
+    // Execute the proposal
+    client.execute_proposal(&admin, &proposal_id);
+
+    let proposal = client.get_proposal(&proposal_id);
+    assert_eq!(proposal.status, ProposalStatus::Executed);
+
+    // Recipient received 1000
+    assert_eq!(token_client.balance(&recipient), 1000);
+
+    // Proposer got their 50 tokens back! (Refunded)
+    assert_eq!(token_client.balance(&proposer), 1000);
+
+    // Track slashed insurance pool -> should be 0, no rejection happened
+    let pool = client.get_insurance_pool(&token_addr);
+    assert_eq!(pool, 0);
+}
+
+#[test]
+fn test_insurance_slashing_on_rejection() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(VaultDAO, ());
+    let client = VaultDAOClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let proposer = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    
+    let token_admin = Address::generate(&env);
+    let sac = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_addr = sac.address();
+    let sac_admin_client = StellarAssetClient::new(&env, &token_addr);
+
+    let mut signers = Vec::new(&env);
+    signers.push_back(admin.clone());
+    signers.push_back(proposer.clone());
+
+    let config = InitConfig {
+        signers,
+        threshold: 2,
+        quorum: 0,
+        spending_limit: 1000,
+        daily_limit: 5000,
+        weekly_limit: 10000,
+        timelock_threshold: 5000,
+        timelock_delay: 100,
+        velocity_limit: VelocityConfig { limit: 1000, window: 3600 },
+        threshold_strategy: ThresholdStrategy::Fixed,
+        default_voting_deadline: 0,
+        retry_config: RetryConfig { enabled: false, max_retries: 0, initial_backoff_ledgers: 0 },
+    };
+    client.initialize(&admin, &config);
+    client.set_role(&admin, &proposer, &Role::Treasurer);
+
+    // Setup Insurance: Requires 10%, Slash rate 50%
+    client.set_insurance_config(&admin, &InsuranceConfig {
+        enabled: true,
+        min_amount: 100,
+        min_insurance_bps: 1000, // 10%
+        slash_percentage: 50,    // 50%
+    });
+
+    sac_admin_client.mint(&proposer, &1000);
+    let token_client = soroban_sdk::token::Client::new(&env, &token_addr);
+
+    // Propose 500 tokens. 10% is 50.
+    let proposal_id = client.propose_transfer(
+        &proposer,
+        &recipient,
+        &token_addr,
+        &500,
+        &Symbol::new(&env, "bad_prop"),
+        &Priority::Normal,
+        &Vec::new(&env),
+        &ConditionLogic::And,
+        &50,
+    );
+    assert_eq!(token_client.balance(&proposer), 950);
+
+    // Admin REJECTS the proposal
+    client.reject_proposal(&admin, &proposal_id);
+
+    let proposal = client.get_proposal(&proposal_id);
+    assert_eq!(proposal.status, ProposalStatus::Rejected);
+
+    // Proposer had 50 insurance. 50% slash = 25 kept by vault, 25 returned.
+    // 950 + 25 = 975
+    assert_eq!(token_client.balance(&proposer), 975);
+
+    // Admin checks the persistent insurance pool tracker
+    let pool = client.get_insurance_pool(&token_addr);
+    assert_eq!(pool, 25);
+}
+
+#[test]
+fn test_insurance_pool_withdrawal() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(VaultDAO, ());
+    let client = VaultDAOClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let proposer = Address::generate(&env);
+    let withdraw_target = Address::generate(&env);
+    
+    let token_admin = Address::generate(&env);
+    let sac = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_addr = sac.address();
+    let sac_admin_client = StellarAssetClient::new(&env, &token_addr);
+
+    let mut signers = Vec::new(&env);
+    signers.push_back(admin.clone());
+
+    let config = InitConfig {
+        signers,
+        threshold: 1,
+        quorum: 0,
+        spending_limit: 1000,
+        daily_limit: 5000,
+        weekly_limit: 10000,
+        timelock_threshold: 5000,
+        timelock_delay: 100,
+        velocity_limit: VelocityConfig { limit: 1000, window: 3600 },
+        threshold_strategy: ThresholdStrategy::Fixed,
+        default_voting_deadline: 0,
+        retry_config: RetryConfig { enabled: false, max_retries: 0, initial_backoff_ledgers: 0 },
+    };
+    client.initialize(&admin, &config);
+    client.set_role(&admin, &proposer, &Role::Treasurer);
+
+    client.set_insurance_config(&admin, &InsuranceConfig {
+        enabled: true,
+        min_amount: 0,
+        min_insurance_bps: 1000, // 10%
+        slash_percentage: 100,   // 100% slashed
+    });
+
+    sac_admin_client.mint(&proposer, &1000);
+    let token_client = soroban_sdk::token::Client::new(&env, &token_addr);
+
+    // Create and immediately reject proposal
+    let proposal_id = client.propose_transfer(
+        &proposer,
+        &proposer,
+        &token_addr,
+        &500,
+        &Symbol::new(&env, "prop"),
+        &Priority::Normal,
+        &Vec::new(&env),
+        &ConditionLogic::And,
+        &50,
+    );
+    client.reject_proposal(&admin, &proposal_id);
+
+    // 100% of 50 slashed to pool
+    let pool = client.get_insurance_pool(&token_addr);
+    assert_eq!(pool, 50);
+
+    assert_eq!(token_client.balance(&withdraw_target), 0);
+
+    // Admin withdraws the insurance penalty
+    client.withdraw_insurance_pool(&admin, &token_addr, &withdraw_target, &50);
+
+    // Target got the slashed funds
+    assert_eq!(token_client.balance(&withdraw_target), 50);
+
+    // Pool must be 0
+    let pool_after = client.get_insurance_pool(&token_addr);
+    assert_eq!(pool_after, 0);
+
+    // Cannot withdraw anymore
+    let result = client.try_withdraw_insurance_pool(&admin, &token_addr, &withdraw_target, &1);
+    assert!(result.is_err());
 }

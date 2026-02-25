@@ -928,6 +928,11 @@ impl VaultDAO {
                 token::transfer(&env, &proposal.token, &proposal.proposer, return_amount);
             }
 
+            // Track slashed funds into the insurance pool independently from general vault treasury
+            if slash_amount > 0 {
+                storage::add_to_insurance_pool(&env, &proposal.token, slash_amount);
+            }
+
             events::emit_insurance_slashed(
                 &env,
                 proposal_id,
@@ -1346,6 +1351,40 @@ impl VaultDAO {
         Ok(())
     }
 
+    /// Admin withdraws slashed insurance funds
+    pub fn withdraw_insurance_pool(
+        env: Env,
+        admin: Address,
+        token_addr: Address,
+        recipient: Address,
+        amount: i128,
+    ) -> Result<(), VaultError> {
+        // Implementation from original logic before the issue.
+        admin.require_auth();
+
+        let role = storage::get_role(&env, &admin);
+        if role != Role::Admin {
+            return Err(VaultError::Unauthorized);
+        }
+
+        if amount <= 0 {
+            return Err(VaultError::InvalidAmount);
+        }
+
+        let current_pool = storage::get_insurance_pool(&env, &token_addr);
+        if amount > current_pool {
+            return Err(VaultError::InsufficientBalance);
+        }
+
+        // Subtracted from the independent pool tracker
+        storage::subtract_from_insurance_pool(&env, &token_addr, amount);
+
+        // Execute actual token transfer from vault mapping
+        token::transfer(&env, &token_addr, &recipient, amount);
+
+        Ok(())
+    }
+
     // ========================================================================
     // View Functions
     // ========================================================================
@@ -1353,6 +1392,11 @@ impl VaultDAO {
     /// Get proposal by ID
     pub fn get_proposal(env: Env, proposal_id: u64) -> Result<Proposal, VaultError> {
         storage::get_proposal(&env, proposal_id)
+    }
+
+    /// Get current pooled slash insurance balance
+    pub fn get_insurance_pool(env: Env, token_addr: Address) -> i128 {
+        storage::get_insurance_pool(&env, &token_addr)
     }
 
     /// Get role for an address

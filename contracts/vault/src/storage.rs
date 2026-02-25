@@ -111,6 +111,8 @@ pub enum DataKey {
     FunderEscrows(Address),
     /// Escrow IDs by recipient address -> Vec<u64>
     RecipientEscrows(Address),
+    /// Insurance pool accumulated slashed funds (Token Address) -> i128
+    InsurancePool(Address),
 }
 
 /// TTL constants (in ledgers, ~5 seconds each)
@@ -656,6 +658,35 @@ pub fn set_insurance_config(env: &Env, config: &InsuranceConfig) {
     env.storage()
         .instance()
         .set(&DataKey::InsuranceConfig, config);
+}
+
+pub fn get_insurance_pool(env: &Env, token_addr: &Address) -> i128 {
+    env.storage()
+        .persistent()
+        .get(&DataKey::InsurancePool(token_addr.clone()))
+        .unwrap_or(0)
+}
+
+pub fn add_to_insurance_pool(env: &Env, token_addr: &Address, amount: i128) {
+    let current = get_insurance_pool(env, token_addr);
+    let key = DataKey::InsurancePool(token_addr.clone());
+    env.storage().persistent().set(&key, &(current + amount));
+    // extend TTL
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, INSTANCE_TTL_THRESHOLD, PERSISTENT_TTL); // Keeps pool persistent
+}
+
+#[allow(dead_code)]
+pub fn subtract_from_insurance_pool(env: &Env, token_addr: &Address, amount: i128) {
+    let current = get_insurance_pool(env, token_addr);
+    let key = DataKey::InsurancePool(token_addr.clone());
+    env.storage()
+        .persistent()
+        .set(&key, &(current.saturating_sub(amount).max(0)));
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, INSTANCE_TTL_THRESHOLD, PERSISTENT_TTL);
 }
 
 // ============================================================================
