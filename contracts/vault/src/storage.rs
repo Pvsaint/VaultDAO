@@ -22,9 +22,10 @@ use soroban_sdk::{contracttype, Address, Env, String, Vec};
 
 use crate::errors::VaultError;
 use crate::types::{
-    Comment, Config, DexConfig, Escrow, ExecutionFeeEstimate, GasConfig, InsuranceConfig, ListMode,
-    NotificationPreferences, Proposal, ProposalAmendment, ProposalTemplate, RecoveryProposal,
-    Reputation, RetryState, Role, Subscription, SubscriptionPayment, VaultMetrics, VelocityConfig,
+    Comment, Config, DelegatedPermission, DexConfig, Escrow, ExecutionFeeEstimate, GasConfig,
+    InsuranceConfig, ListMode, NotificationPreferences, PermissionGrant, Proposal,
+    ProposalAmendment, ProposalTemplate, RecoveryProposal, Reputation, RetryState, Role,
+    Subscription, SubscriptionPayment, VaultMetrics, VelocityConfig,
 };
 
 /// Storage key definitions
@@ -1171,4 +1172,41 @@ pub fn increment_recovery_id(env: &Env) -> u64 {
         .instance()
         .set(&DataKey::NextRecoveryId, &(id + 1));
     id
+}
+
+// ============================================================================
+// Permissions (Issue: feature/advanced-permissions)
+// ============================================================================
+// NOTE: Permission storage functions are stubbed to avoid exceeding
+// Soroban's enum variant limit. The advanced permissions feature is not
+// fully implemented yet. These stubs allow the code to compile.
+
+pub fn get_permissions(env: &Env, _addr: &Address) -> Vec<PermissionGrant> {
+    Vec::new(env)
+}
+
+pub fn set_permissions(_env: &Env, _addr: &Address, _permissions: Vec<PermissionGrant>) {
+    // Stub: no-op
+}
+
+pub fn get_delegated_permission(
+    _env: &Env,
+    _delegatee: &Address,
+    _delegator: &Address,
+    _permission: u32,
+) -> Option<DelegatedPermission> {
+    None
+}
+
+pub fn set_delegated_permission(_env: &Env, _delegation: &DelegatedPermission) {
+    // Stub: no-op
+}
+
+pub fn remove_delegated_permission(
+    _env: &Env,
+    _delegatee: &Address,
+    _delegator: &Address,
+    _permission: u32,
+) {
+    // Stub: no-op
 }
