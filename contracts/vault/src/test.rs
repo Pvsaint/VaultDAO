@@ -3786,9 +3786,9 @@ fn test_retry_backoff_enforced() {
     // First execution — schedules retry
     client.execute_proposal(&admin, &proposal_id);
 
-    // Try again immediately — should fail with RetryBackoffNotElapsed
+    // Try again immediately — should fail with RetryError
     let result = client.try_execute_proposal(&admin, &proposal_id);
-    assert_eq!(result.err(), Some(Ok(VaultError::RetryBackoffNotElapsed)));
+    assert_eq!(result.err(), Some(Ok(VaultError::RetryError)));
 }
 
 #[test]
@@ -3824,7 +3824,7 @@ fn test_retry_max_retries_exhausted() {
         li.sequence_number += 100;
     });
     let result = client.try_execute_proposal(&admin, &proposal_id);
-    assert_eq!(result.err(), Some(Ok(VaultError::MaxRetriesExceeded)));
+    assert_eq!(result.err(), Some(Ok(VaultError::RetryError)));
 }
 
 #[test]
@@ -4019,7 +4019,7 @@ fn test_retry_disabled_rejects_retry_execution() {
 
     // retry_execution should fail when retry is disabled
     let result = client.try_retry_execution(&admin, &1_u64);
-    assert_eq!(result.err(), Some(Ok(VaultError::RetryNotEnabled)));
+    assert_eq!(result.err(), Some(Ok(VaultError::RetryError)));
 }
 
 #[test]
@@ -5735,6 +5735,244 @@ fn test_reputation_decay_over_time() {
     }
 }
 
+/// Test creating proposal from template with overrides
+#[test]
+fn test_create_from_template_with_overrides() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(VaultDAO, ());
+    let client = VaultDAOClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let treasurer = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let new_recipient = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    let mut signers = Vec::new(&env);
+    signers.push_back(admin.clone());
+    signers.push_back(treasurer.clone());
+
+    let config = InitConfig {
+        signers,
+        threshold: 1,
+        quorum: 0,
+        spending_limit: 1000,
+        daily_limit: 5000,
+        weekly_limit: 10000,
+        timelock_threshold: 500,
+        timelock_delay: 100,
+        velocity_limit: VelocityConfig {
+            limit: 100,
+            window: 3600,
+        },
+        threshold_strategy: ThresholdStrategy::Fixed,
+        default_voting_deadline: 0,
+        retry_config: RetryConfig {
+            enabled: false,
+            max_retries: 0,
+            initial_backoff_ledgers: 0,
+        },
+    };
+    client.initialize(&admin, &config);
+    client.set_role(&admin, &treasurer, &Role::Treasurer);
+
+    // Create template
+    let template_id = client.create_template(
+        &admin,
+        &Symbol::new(&env, "payroll"),
+        &Symbol::new(&env, "monthly_payroll"),
+        &recipient,
+        &token,
+        &100,
+        &Symbol::new(&env, "salary"),
+        &50,
+        &200,
+    );
+
+    // Create proposal with overrides
+    let overrides = TemplateOverrides {
+        override_recipient: true,
+        recipient: new_recipient.clone(),
+        override_amount: true,
+        amount: 150,
+        override_memo: true,
+        memo: Symbol::new(&env, "bonus"),
+        override_priority: true,
+        priority: Priority::High,
+    };
+    let proposal_id = client.create_from_template(&treasurer, &template_id, &overrides);
+
+    // Verify proposal
+    let proposal = client.get_proposal(&proposal_id);
+    assert_eq!(proposal.recipient, new_recipient);
+    assert_eq!(proposal.amount, 150);
+    assert_eq!(proposal.memo, Symbol::new(&env, "bonus"));
+    assert_eq!(proposal.priority, Priority::High);
+}
+
+/// Test that amount out of range is rejected
+#[test]
+fn test_create_from_template_amount_out_of_range() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(VaultDAO, ());
+    let client = VaultDAOClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let treasurer = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    let mut signers = Vec::new(&env);
+    signers.push_back(admin.clone());
+    signers.push_back(treasurer.clone());
+
+    let config = InitConfig {
+        signers,
+        threshold: 1,
+        quorum: 0,
+        spending_limit: 1000,
+        daily_limit: 5000,
+        weekly_limit: 10000,
+        timelock_threshold: 500,
+        timelock_delay: 100,
+        velocity_limit: VelocityConfig {
+            limit: 100,
+            window: 3600,
+        },
+        threshold_strategy: ThresholdStrategy::Fixed,
+        default_voting_deadline: 0,
+        retry_config: RetryConfig {
+            enabled: false,
+            max_retries: 0,
+            initial_backoff_ledgers: 0,
+        },
+    };
+    client.initialize(&admin, &config);
+    client.set_role(&admin, &treasurer, &Role::Treasurer);
+
+    // Create template with bounds
+    let template_id = client.create_template(
+        &admin,
+        &Symbol::new(&env, "payroll"),
+        &Symbol::new(&env, "monthly_payroll"),
+        &recipient,
+        &token,
+        &100,
+        &Symbol::new(&env, "salary"),
+        &50,
+        &200,
+    );
+
+    // Try amount below minimum
+    let overrides = TemplateOverrides {
+        override_recipient: false,
+        recipient: Address::generate(&env),
+        override_amount: true,
+        amount: 25, // Below min of 50
+        override_memo: false,
+        memo: Symbol::new(&env, ""),
+        override_priority: false,
+        priority: Priority::Normal,
+    };
+    let result = client.try_create_from_template(&treasurer, &template_id, &overrides);
+    assert_eq!(result.err(), Some(Ok(VaultError::TemplateValidationFailed)));
+
+    // Try amount above maximum
+    let overrides = TemplateOverrides {
+        override_recipient: false,
+        recipient: Address::generate(&env),
+        override_amount: true,
+        amount: 300, // Above max of 200
+        override_memo: false,
+        memo: Symbol::new(&env, ""),
+        override_priority: false,
+        priority: Priority::Normal,
+    };
+    let result = client.try_create_from_template(&treasurer, &template_id, &overrides);
+    assert_eq!(result.err(), Some(Ok(VaultError::TemplateValidationFailed)));
+}
+
+/// Test that inactive template cannot be used
+#[test]
+fn test_create_from_inactive_template() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(VaultDAO, ());
+    let client = VaultDAOClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let treasurer = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token_id = env.register_stellar_asset_contract_v2(admin.clone());
+    let token = token_id.address();
+    let sac_admin_client = StellarAssetClient::new(&env, &token_id.address());
+
+    let mut signers = Vec::new(&env);
+    signers.push_back(admin.clone());
+
+    let config = InitConfig {
+        signers,
+        threshold: 1,
+        quorum: 0,
+        spending_limit: 1000,
+        daily_limit: 5000,
+        weekly_limit: 10000,
+        timelock_threshold: 500,
+        timelock_delay: 100,
+        velocity_limit: VelocityConfig {
+            limit: 100,
+            window: 3600,
+        },
+        threshold_strategy: ThresholdStrategy::Fixed,
+        default_voting_deadline: 0,
+        retry_config: RetryConfig {
+            enabled: false,
+            max_retries: 0,
+            initial_backoff_ledgers: 0,
+        },
+    };
+
+    client.initialize(&admin, &config);
+    client.set_role(&admin, &treasurer, &Role::Treasurer);
+
+    sac_admin_client.mint(&contract_id, &100);
+
+    // Create template
+    let template_id = client.create_template(
+        &admin,
+        &Symbol::new(&env, "payroll"),
+        &Symbol::new(&env, "monthly_payroll"),
+        &recipient,
+        &token,
+        &100,
+        &Symbol::new(&env, "salary"),
+        &0,
+        &0,
+    );
+
+    // Deactivate template
+    client.set_template_status(&admin, &template_id, &false);
+
+    // Try to create from inactive template
+    let overrides = TemplateOverrides {
+        override_recipient: false,
+        recipient: Address::generate(&env),
+        override_amount: false,
+        amount: 0,
+        override_memo: false,
+        memo: Symbol::new(&env, ""),
+        override_priority: false,
+        priority: Priority::Normal,
+    };
+    let result = client.try_create_from_template(&treasurer, &template_id, &overrides);
+    assert_eq!(result.err(), Some(Ok(VaultError::TemplateInactive)));
+}
+
 #[test]
 fn test_reputation_based_spending_limit() {
     let env = Env::default();
@@ -5814,7 +6052,8 @@ fn test_reputation_high_score_get_limits_boost() {
     let client = VaultDAOClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
-    let proposer = Address::generate(&env);
+    let _proposer = Address::generate(&env);
+    let treasurer = Address::generate(&env);
     let signer = Address::generate(&env);
     let recipient = Address::generate(&env);
     let token = Address::generate(&env);
@@ -5834,6 +6073,138 @@ fn test_reputation_high_score_get_limits_boost() {
         timelock_delay: 0,
         velocity_limit: VelocityConfig {
             limit: 1000,
+            window: 3600,
+        },
+        threshold_strategy: ThresholdStrategy::Fixed,
+        default_voting_deadline: 0,
+        retry_config: RetryConfig {
+            enabled: false,
+            max_retries: 0,
+            initial_backoff_ledgers: 0,
+        },
+    };
+    client.initialize(&admin, &config);
+    client.set_role(&admin, &treasurer, &Role::Treasurer);
+
+    // Create and deactivate template
+    let template_id = client.create_template(
+        &admin,
+        &Symbol::new(&env, "payroll"),
+        &Symbol::new(&env, "monthly_payroll"),
+        &recipient,
+        &token,
+        &100,
+        &Symbol::new(&env, "salary"),
+        &50,
+        &200,
+    );
+    client.set_template_status(&admin, &template_id, &false);
+
+    // Try to create from inactive template
+    let overrides = TemplateOverrides {
+        override_recipient: false,
+        recipient: Address::generate(&env),
+        override_amount: false,
+        amount: 0,
+        override_memo: false,
+        memo: Symbol::new(&env, ""),
+        override_priority: false,
+        priority: Priority::Normal,
+    };
+    let result = client.try_create_from_template(&treasurer, &template_id, &overrides);
+    assert_eq!(result.err(), Some(Ok(VaultError::TemplateInactive)));
+}
+
+/// Test template not found error
+#[test]
+fn test_template_not_found() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(VaultDAO, ());
+    let client = VaultDAOClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+
+    let mut signers = Vec::new(&env);
+    signers.push_back(admin.clone());
+
+    let config = InitConfig {
+        signers,
+        threshold: 1,
+        quorum: 0,
+        spending_limit: 1000,
+        daily_limit: 5000,
+        weekly_limit: 10000,
+        timelock_threshold: 500,
+        timelock_delay: 100,
+        velocity_limit: VelocityConfig {
+            limit: 100,
+            window: 3600,
+        },
+        threshold_strategy: ThresholdStrategy::Fixed,
+        default_voting_deadline: 0,
+        retry_config: RetryConfig {
+            enabled: false,
+            max_retries: 0,
+            initial_backoff_ledgers: 0,
+        },
+    };
+    client.initialize(&admin, &config);
+
+    // Try to get non-existent template
+    let result = client.try_get_template(&999);
+    assert_eq!(result.err(), Some(Ok(VaultError::TemplateNotFound)));
+}
+
+/// Test template validation function
+#[test]
+fn test_validate_template_params() {
+    let env = Env::default();
+    let contract_id = env.register(VaultDAO, ());
+    let client = VaultDAOClient::new(&env, &contract_id);
+
+    // Valid params
+    assert!(client.validate_template_params(&100, &50, &200));
+    assert!(client.validate_template_params(&100, &0, &0)); // No bounds
+    assert!(client.validate_template_params(&100, &100, &200)); // Amount at min
+
+    // Invalid params
+    assert!(!client.validate_template_params(&0, &0, &0)); // Zero amount
+    assert!(!client.validate_template_params(&-100, &0, &0)); // Negative amount
+    assert!(!client.validate_template_params(&100, &200, &50)); // Min > Max
+    assert!(!client.validate_template_params(&25, &50, &200)); // Amount below min
+    assert!(!client.validate_template_params(&300, &50, &200)); // Amount above max
+}
+
+#[test]
+fn test_retry_not_enabled() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(VaultDAO, ());
+    let client = VaultDAOClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let proposer = Address::generate(&env);
+    let signer = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    let mut signers = Vec::new(&env);
+    signers.push_back(admin.clone());
+
+    let config = InitConfig {
+        signers,
+        threshold: 1,
+        quorum: 0,
+        spending_limit: 1000,
+        daily_limit: 5000,
+        weekly_limit: 10000,
+        timelock_threshold: 500,
+        timelock_delay: 100,
+        velocity_limit: VelocityConfig {
+            limit: 100,
             window: 3600,
         },
         threshold_strategy: ThresholdStrategy::Fixed,
