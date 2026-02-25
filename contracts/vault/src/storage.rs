@@ -27,6 +27,24 @@ use crate::types::{
     ProposalTemplate, RecoveryProposal, Reputation, RetryState, Role, VaultMetrics, VelocityConfig,
 };
 
+/// Storage keys for batch transactions
+#[contracttype]
+#[derive(Clone)]
+pub enum BatchKey {
+    Transaction(u64),
+    Result(u64),
+    Rollback(u64),
+    Counter,
+}
+
+/// Storage keys for streaming payments
+#[contracttype]
+#[derive(Clone)]
+pub enum StreamKey {
+    Payment(u64),
+    Counter,
+}
+
 /// Storage key definitions
 #[contracttype]
 #[derive(Clone)]
@@ -123,10 +141,10 @@ pub enum DataKey {
     NextRecoveryId,
     /// Insurance pool accumulated slashed funds (Token Address) -> i128
     InsurancePool(Address),
-    /// Streaming payment by ID -> StreamingPayment
-    StreamingPayment(u64),
-    /// Next streaming payment ID counter -> u64
-    NextStreamId,
+    /// Streaming payment related data -> StreamKey
+    Stream(StreamKey),
+    /// Batch transaction related data -> BatchKey
+    Batch(BatchKey),
 }
 
 /// TTL constants (in ledgers, ~5 seconds each)
@@ -355,7 +373,7 @@ pub fn get_recurring_payment(
 pub fn get_next_stream_id(env: &Env) -> u64 {
     env.storage()
         .instance()
-        .get(&DataKey::NextStreamId)
+        .get::<DataKey, u64>(&DataKey::Stream(StreamKey::Counter))
         .unwrap_or(1)
 }
 
@@ -363,25 +381,28 @@ pub fn increment_stream_id(env: &Env) -> u64 {
     let id = get_next_stream_id(env);
     env.storage()
         .instance()
-        .set(&DataKey::NextStreamId, &(id + 1));
+        .set(&DataKey::Stream(StreamKey::Counter), &(id + 1));
+    extend_instance_ttl(env);
     id
 }
 
 pub fn set_streaming_payment(env: &Env, stream: &crate::types::StreamingPayment) {
-    let key = DataKey::StreamingPayment(stream.id);
+    let key = DataKey::Stream(StreamKey::Payment(stream.id));
     env.storage().persistent().set(&key, stream);
     env.storage()
         .persistent()
-        .extend_ttl(&key, INSTANCE_TTL_THRESHOLD, INSTANCE_TTL);
+        .extend_ttl(&key, PERSISTENT_TTL_THRESHOLD, PERSISTENT_TTL);
 }
 
 pub fn get_streaming_payment(
     env: &Env,
     id: u64,
 ) -> Result<crate::types::StreamingPayment, VaultError> {
+    let key = DataKey::Stream(StreamKey::Payment(id));
     env.storage()
         .persistent()
-        .get(&DataKey::StreamingPayment(id))
+        .get(&key)
+        .flatten()
         .ok_or(VaultError::ProposalNotFound)
 }
 
@@ -1108,6 +1129,76 @@ pub fn add_recipient_escrow(env: &Env, recipient: &Address, escrow_id: u64) {
         .persistent()
         .extend_ttl(&key, INSTANCE_TTL_THRESHOLD, INSTANCE_TTL);
 }
+
+// ============================================================================
+// Batch Transactions
+// ============================================================================
+
+pub fn get_next_batch_id(env: &Env) -> u64 {
+    env.storage()
+        .instance()
+        .get::<DataKey, u64>(&DataKey::Batch(BatchKey::Counter))
+        .unwrap_or(0)
+}
+
+pub fn increment_batch_id(env: &Env) -> u64 {
+    let current = get_next_batch_id(env);
+    let next = current + 1;
+    env.storage()
+        .instance()
+        .set(&DataKey::Batch(BatchKey::Counter), &next);
+    extend_instance_ttl(env);
+    next
+}
+
+pub fn set_batch(env: &Env, batch: &crate::types::BatchTransaction) {
+    let key = DataKey::Batch(BatchKey::Transaction(batch.id));
+    env.storage().persistent().set(&key, batch);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_TTL_THRESHOLD, PERSISTENT_TTL);
+}
+
+pub fn get_batch(env: &Env, batch_id: u64) -> Result<crate::types::BatchTransaction, VaultError> {
+    let key = DataKey::Batch(BatchKey::Transaction(batch_id));
+    env.storage()
+        .persistent()
+        .get(&key)
+        .flatten()
+        .ok_or(VaultError::BatchNotFound)
+}
+
+pub fn set_batch_result(env: &Env, result: &crate::types::BatchExecutionResult) {
+    let key = DataKey::Batch(BatchKey::Result(result.batch_id));
+    env.storage().persistent().set(&key, result);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_TTL_THRESHOLD, PERSISTENT_TTL);
+}
+
+pub fn get_batch_result(env: &Env, batch_id: u64) -> Option<crate::types::BatchExecutionResult> {
+    let key = DataKey::Batch(BatchKey::Result(batch_id));
+    env.storage().persistent().get(&key).flatten()
+}
+
+#[allow(dead_code)]
+pub fn get_rollback_state(env: &Env, batch_id: u64) -> Vec<(Address, i128)> {
+    let key = DataKey::Batch(BatchKey::Rollback(batch_id));
+    env.storage()
+        .persistent()
+        .get(&key)
+        .flatten()
+        .unwrap_or_else(|| Vec::new(env))
+}
+
+pub fn set_rollback_state(env: &Env, batch_id: u64, state: &Vec<(Address, i128)>) {
+    let key = DataKey::Batch(BatchKey::Rollback(batch_id));
+    env.storage().persistent().set(&key, state);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_TTL_THRESHOLD, PERSISTENT_TTL);
+}
+
 // ============================================================================
 // Wallet Recovery (Issue: feature/wallet-recovery)
 // ============================================================================

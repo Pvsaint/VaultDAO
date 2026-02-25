@@ -3,8 +3,7 @@
 use super::*;
 use crate::types::{
     CrossVaultConfig, CrossVaultStatus, DexConfig, DisputeResolution, DisputeStatus, RetryConfig,
-    StreamStatus, SwapProposal, TimeBasedThreshold, TransferDetails, VaultAction,
-    VelocityConfig,
+    StreamStatus, SwapProposal, TimeBasedThreshold, TransferDetails, VaultAction, VelocityConfig,
 };
 use crate::{InitConfig, VaultDAO, VaultDAOClient};
 use soroban_sdk::{
@@ -6856,3 +6855,5 @@ fn test_stream_cancel() {
     assert_eq!(stream.status, StreamStatus::Cancelled);
     assert_eq!(stream.claimed_amount, 40);
 }
+
+// ============================================================================
