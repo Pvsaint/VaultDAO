@@ -223,7 +223,25 @@ interface RawEvent {
 }
 
 export const useVaultContract = () => {
-    const { address, isConnected, signTransaction } = useWallet();
+    const { address, isConnected, network, signTransaction } = useWallet();
+
+    /**
+     * Preflight check for mutation actions.
+     * Throws a user-friendly error if the wallet or network is not ready.
+     * Returns the non-null address for use in the calling function.
+     */
+    const assertReady = useCallback((): string => {
+        if (!isConnected || !address) {
+            throw new Error('Please connect your wallet before performing this action.');
+        }
+        if (network && network.toUpperCase() !== env.stellarNetwork.toUpperCase()) {
+            throw new Error(`Wrong network. Please switch your wallet to ${env.stellarNetwork}.`);
+        }
+        if (!env.contractId) {
+            throw new Error('Contract is not configured. Check your environment settings.');
+        }
+        return address;
+    }, [isConnected, address, network]);
     const recipientStorageKey = `${RECIPIENT_LIST_STORAGE_PREFIX}_${env.contractId}`;
     const loadRecipientState = useCallback((): { mode: ListMode; whitelist: string[]; blacklist: string[] } => {
         try {
@@ -457,10 +475,10 @@ export const useVaultContract = () => {
     }, [address, getUserRole, readContractValue]);
 
     const proposeTransfer = async (recipient: string, token: string, amount: string, memo: string) => {
-        if (!isConnected || !address) throw new Error("Wallet not connected");
+        const _addr = assertReady();
         setLoading(true);
         try {
-            const account = await server.getAccount(address);
+            const account = await server.getAccount(_addr);
             const tx = new TransactionBuilder(account, { fee: "100" })
                 .setNetworkPassphrase(env.networkPassphrase)
                 .setTimeout(30)
@@ -470,7 +488,7 @@ export const useVaultContract = () => {
                             contractAddress: Address.fromString(env.contractId).toScAddress(),
                             functionName: "propose_transfer",
                             args: [
-                                new Address(address).toScVal(),
+                                new Address(_addr).toScVal(),
                                 new Address(recipient).toScVal(),
                                 new Address(token).toScVal(),
                                 nativeToScVal(BigInt(amount)),
@@ -495,10 +513,10 @@ export const useVaultContract = () => {
     };
 
     const approveProposal = async (proposalId: number) => {
-        if (!isConnected || !address) throw new Error("Wallet not connected");
+        const _addr = assertReady();
         setLoading(true);
         try {
-            const account = await server.getAccount(address);
+            const account = await server.getAccount(_addr);
             const tx = new TransactionBuilder(account, { fee: "100" })
                 .setNetworkPassphrase(env.networkPassphrase)
                 .setTimeout(30)
@@ -508,7 +526,7 @@ export const useVaultContract = () => {
                             contractAddress: Address.fromString(env.contractId).toScAddress(),
                             functionName: "approve_proposal",
                             args: [
-                                new Address(address).toScVal(),
+                                new Address(_addr).toScVal(),
                                 nativeToScVal(BigInt(proposalId), { type: "u64" }),
                             ],
                         })
@@ -530,10 +548,10 @@ export const useVaultContract = () => {
     };
 
     const rejectProposal = async (proposalId: number) => {
-        if (!isConnected || !address) throw new Error("Wallet not connected");
+        const _addr = assertReady();
         setLoading(true);
         try {
-            const account = await server.getAccount(address);
+            const account = await server.getAccount(_addr);
             const tx = new TransactionBuilder(account, { fee: "100" })
                 .setNetworkPassphrase(env.networkPassphrase)
                 .setTimeout(30)
@@ -543,7 +561,7 @@ export const useVaultContract = () => {
                             contractAddress: Address.fromString(env.contractId).toScAddress(),
                             functionName: "reject_proposal",
                             args: [
-                                new Address(address).toScVal(),
+                                new Address(_addr).toScVal(),
                                 nativeToScVal(BigInt(proposalId), { type: "u64" }),
                             ],
                         })
@@ -565,10 +583,10 @@ export const useVaultContract = () => {
     };
 
     const executeProposal = async (proposalId: number) => {
-        if (!isConnected || !address) throw new Error("Wallet not connected");
+        const _addr = assertReady();
         setLoading(true);
         try {
-            const account = await server.getAccount(address);
+            const account = await server.getAccount(_addr);
             const tx = new TransactionBuilder(account, { fee: "100" })
                 .setNetworkPassphrase(env.networkPassphrase)
                 .setTimeout(30)
@@ -578,7 +596,7 @@ export const useVaultContract = () => {
                             contractAddress: Address.fromString(env.contractId).toScAddress(),
                             functionName: "execute_proposal",
                             args: [
-                                new Address(address).toScVal(),
+                                new Address(_addr).toScVal(),
                                 nativeToScVal(BigInt(proposalId), { type: "u64" }),
                             ],
                         })
@@ -601,10 +619,10 @@ export const useVaultContract = () => {
     };
 
     const addSigner = async (signer: string) => {
-        if (!isConnected || !address) throw new Error("Wallet not connected");
+        const _addr = assertReady();
         setLoading(true);
         try {
-            const account = await server.getAccount(address);
+            const account = await server.getAccount(_addr);
             const tx = new TransactionBuilder(account, { fee: "100" })
                 .setNetworkPassphrase(env.networkPassphrase)
                 .setTimeout(30)
@@ -613,7 +631,7 @@ export const useVaultContract = () => {
                         new xdr.InvokeContractArgs({
                             contractAddress: Address.fromString(env.contractId).toScAddress(),
                             functionName: "add_signer",
-                            args: [new Address(address).toScVal(), new Address(signer).toScVal()],
+                            args: [new Address(_addr).toScVal(), new Address(signer).toScVal()],
                         })
                     ),
                     auth: [],
@@ -633,10 +651,10 @@ export const useVaultContract = () => {
     };
 
     const removeSigner = async (signer: string) => {
-        if (!isConnected || !address) throw new Error("Wallet not connected");
+        const _addr = assertReady();
         setLoading(true);
         try {
-            const account = await server.getAccount(address);
+            const account = await server.getAccount(_addr);
             const tx = new TransactionBuilder(account, { fee: "100" })
                 .setNetworkPassphrase(env.networkPassphrase)
                 .setTimeout(30)
@@ -645,7 +663,7 @@ export const useVaultContract = () => {
                         new xdr.InvokeContractArgs({
                             contractAddress: Address.fromString(env.contractId).toScAddress(),
                             functionName: "remove_signer",
-                            args: [new Address(address).toScVal(), new Address(signer).toScVal()],
+                            args: [new Address(_addr).toScVal(), new Address(signer).toScVal()],
                         })
                     ),
                     auth: [],
@@ -665,10 +683,10 @@ export const useVaultContract = () => {
     };
 
     const updateThreshold = async (newThreshold: number) => {
-        if (!isConnected || !address) throw new Error("Wallet not connected");
+        const _addr = assertReady();
         setLoading(true);
         try {
-            const account = await server.getAccount(address);
+            const account = await server.getAccount(_addr);
             const tx = new TransactionBuilder(account, { fee: "100" })
                 .setNetworkPassphrase(env.networkPassphrase)
                 .setTimeout(30)
@@ -677,7 +695,7 @@ export const useVaultContract = () => {
                         new xdr.InvokeContractArgs({
                             contractAddress: Address.fromString(env.contractId).toScAddress(),
                             functionName: "update_threshold",
-                            args: [new Address(address).toScVal(), nativeToScVal(BigInt(newThreshold), { type: "u32" })],
+                            args: [new Address(_addr).toScVal(), nativeToScVal(BigInt(newThreshold), { type: "u32" })],
                         })
                     ),
                     auth: [],
@@ -697,10 +715,10 @@ export const useVaultContract = () => {
     };
 
     const updateSpendingLimits = async (proposalLimit: bigint, dailyLimit: bigint, weeklyLimit: bigint) => {
-        if (!isConnected || !address) throw new Error("Wallet not connected");
+        const _addr = assertReady();
         setLoading(true);
         try {
-            const account = await server.getAccount(address);
+            const account = await server.getAccount(_addr);
             const tx = new TransactionBuilder(account, { fee: "100" })
                 .setNetworkPassphrase(env.networkPassphrase)
                 .setTimeout(30)
@@ -710,7 +728,7 @@ export const useVaultContract = () => {
                             contractAddress: Address.fromString(env.contractId).toScAddress(),
                             functionName: "update_limits",
                             args: [
-                                new Address(address).toScVal(),
+                                new Address(_addr).toScVal(),
                                 nativeToScVal(proposalLimit),
                                 nativeToScVal(dailyLimit),
                                 nativeToScVal(weeklyLimit),
@@ -1401,11 +1419,11 @@ export const useVaultContract = () => {
             return [];
         },
         schedulePayment: async (params?: CreateRecurringPaymentParams): Promise<string> => {
-            if (!isConnected || !address) throw new Error('Wallet not connected');
+            const _addr = assertReady();
             if (!params) throw new Error('Payment parameters required');
             setLoading(true);
             try {
-                const account = await server.getAccount(address);
+                const account = await server.getAccount(_addr);
                 // Convert seconds to ledgers (~5s per ledger), minimum 720 ledgers (1 hour)
                 const LEDGER_INTERVAL_S = 5;
                 const intervalLedgers = Math.max(720, Math.round(params.interval / LEDGER_INTERVAL_S));
@@ -1421,7 +1439,7 @@ export const useVaultContract = () => {
                                 contractAddress: Address.fromString(env.contractId).toScAddress(),
                                 functionName: 'schedule_payment',
                                 args: [
-                                    new Address(address).toScVal(),
+                                    new Address(_addr).toScVal(),
                                     new Address(params.recipient).toScVal(),
                                     new Address(tokenAddress).toScVal(),
                                     nativeToScVal(BigInt(params.amount), { type: 'i128' }),
@@ -1446,11 +1464,11 @@ export const useVaultContract = () => {
             }
         },
         executeRecurringPayment: async (paymentId?: string): Promise<void> => {
-            if (!isConnected || !address) throw new Error('Wallet not connected');
+            const _addr = assertReady();
             if (!paymentId) throw new Error('Payment ID required');
             setLoading(true);
             try {
-                const account = await server.getAccount(address);
+                const account = await server.getAccount(_addr);
                 const tx = new TransactionBuilder(account, { fee: '100' })
                     .setNetworkPassphrase(env.networkPassphrase)
                     .setTimeout(30)
@@ -1507,7 +1525,7 @@ export const useVaultContract = () => {
             return parseRoleAssignments(result);
         },
         setRole: async (targetAddress: string, nextRole: number): Promise<string> => {
-            if (!isConnected || !address) throw new Error("Wallet not connected");
+            const _addr = assertReady();
             const normalizedAddress = targetAddress.trim();
             if (!isValidStellarAddress(normalizedAddress)) {
                 throw new Error('Invalid Stellar address');
@@ -1518,7 +1536,7 @@ export const useVaultContract = () => {
 
             setLoading(true);
             try {
-                const account = await server.getAccount(address);
+                const account = await server.getAccount(_addr);
                 const tx = new TransactionBuilder(account, { fee: "100" })
                     .setNetworkPassphrase(env.networkPassphrase)
                     .setTimeout(30)
@@ -1528,7 +1546,7 @@ export const useVaultContract = () => {
                                 contractAddress: Address.fromString(env.contractId).toScAddress(),
                                 functionName: "set_role",
                                 args: [
-                                    new Address(address).toScVal(),
+                                    new Address(_addr).toScVal(),
                                     new Address(normalizedAddress).toScVal(),
                                     nativeToScVal(BigInt(nextRole), { type: "u32" }),
                                 ],
@@ -1552,7 +1570,7 @@ export const useVaultContract = () => {
         getUserRole,
         assignRole: async (targetAddress: string, nextRole: number): Promise<string> => {
             return await (async () => {
-                if (!isConnected || !address) throw new Error("Wallet not connected");
+                const _addr = assertReady();
                 const normalizedAddress = targetAddress.trim();
                 if (!isValidStellarAddress(normalizedAddress)) {
                     throw new Error('Invalid Stellar address');
@@ -1563,7 +1581,7 @@ export const useVaultContract = () => {
 
                 setLoading(true);
                 try {
-                    const account = await server.getAccount(address);
+                    const account = await server.getAccount(_addr);
                     const tx = new TransactionBuilder(account, { fee: "100" })
                         .setNetworkPassphrase(env.networkPassphrase)
                         .setTimeout(30)
@@ -1573,7 +1591,7 @@ export const useVaultContract = () => {
                                     contractAddress: Address.fromString(env.contractId).toScAddress(),
                                     functionName: "set_role",
                                     args: [
-                                        new Address(address).toScVal(),
+                                        new Address(_addr).toScVal(),
                                         new Address(normalizedAddress).toScVal(),
                                         nativeToScVal(BigInt(nextRole), { type: "u32" }),
                                     ],
@@ -1597,5 +1615,6 @@ export const useVaultContract = () => {
         },
         updateSpendingLimits,
         getProposals,
+        assertReady,
     };
 };

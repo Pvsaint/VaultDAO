@@ -12,10 +12,12 @@ import { useToast } from '../../hooks/useToast';
 import { useVaultContract } from '../../hooks/useVaultContract';
 import { useProposals } from '../../hooks/useProposals';
 import { useWallet } from '../../hooks/useWallet';
+import { useActionReadiness } from '../../hooks/useActionReadiness';
 import { useRealtime } from '../../contexts/RealtimeContext';
 import type { TokenInfo, TokenBalance } from '../../types';
 import { DEFAULT_TOKENS } from '../../constants/tokens';
 import VoiceCommands from '../../components/VoiceCommands';
+import ReadinessWarning from '../../components/ReadinessWarning';
 
 const CopyButton = ({ text }: { text: string }) => (
   <button
@@ -59,6 +61,7 @@ const Proposals: React.FC = () => {
   const { notify } = useToast();
   const { rejectProposal, approveProposal, getTokenBalances } = useVaultContract();
   const { address } = useWallet();
+  const { isReady, checkReady } = useActionReadiness();
   const { subscribe, updatePresence, connectionStatus, trackEvent } = useRealtime();
 
   const {
@@ -217,6 +220,13 @@ const Proposals: React.FC = () => {
 
   const handleRejectConfirm = async () => {
     if (!rejectingId) return;
+    const { ready, message } = checkReady();
+    if (!ready) {
+      notify('proposal_rejected', message ?? 'Not ready', 'error');
+      setShowRejectModal(false);
+      setRejectingId(null);
+      return;
+    }
     try {
       await rejectProposal(Number(rejectingId));
       setLocalProposals(prev => prev.map(p => p.id === rejectingId ? { ...p, status: 'Rejected' } : p));
@@ -232,8 +242,9 @@ const Proposals: React.FC = () => {
 
   const handleApprove = async (proposalId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!address) {
-      notify('proposal_rejected', 'Wallet not connected', 'error');
+    const { ready, message } = checkReady();
+    if (!ready) {
+      notify('proposal_rejected', message ?? 'Not ready', 'error');
       return;
     }
 
@@ -243,7 +254,7 @@ const Proposals: React.FC = () => {
       setLocalProposals(prev => prev.map(p => {
         if (p.id === proposalId) {
           const newApprovals = p.approvals + 1;
-          const newApprovedBy = [...p.approvedBy, address];
+          const newApprovedBy = [...p.approvedBy, address!];
           return {
             ...p,
             approvals: newApprovals,
@@ -281,6 +292,7 @@ const Proposals: React.FC = () => {
   return (
     <div className="min-h-screen bg-gray-900 p-6 text-white">
       <div className="max-w-7xl mx-auto">
+        <ReadinessWarning />
         {connectionStatus === 'connecting' && (
           <div className="mb-4 flex items-center gap-2 rounded-lg bg-yellow-500/10 border border-yellow-500/30 px-4 py-2 text-sm text-yellow-400">
             <Loader2 size={14} className="animate-spin" />
@@ -304,7 +316,15 @@ const Proposals: React.FC = () => {
                 <span>Compare ({selectedForComparison.size})</span>
               </button>
             )}
-            <button onClick={() => setShowNewProposalModal(true)} className="bg-purple-600 hover:bg-purple-700 px-6 py-2 rounded-lg transition">
+            <button
+              onClick={() => {
+                const { ready, message } = checkReady();
+                if (!ready) { notify('proposal_rejected', message ?? 'Not ready', 'error'); return; }
+                setShowNewProposalModal(true);
+              }}
+              disabled={!isReady}
+              className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 disabled:cursor-not-allowed px-6 py-2 rounded-lg transition"
+            >
               New Proposal
             </button>
           </div>
