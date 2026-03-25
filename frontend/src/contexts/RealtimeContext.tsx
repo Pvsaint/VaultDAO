@@ -47,7 +47,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   // Initialize WebSocket connection
   useEffect(() => {
     // Get WebSocket URL from environment or use default
-    const wsUrl = (import.meta.env?.VITE_WS_URL as string | undefined) || 'ws://localhost:8080';
+    const wsUrl = (import.meta.env?.VITE_REALTIME_WS_URL as string | undefined) || 'ws://localhost:3001';
 
     wsClient.current = createWebSocketClient({
       url: wsUrl,
@@ -102,10 +102,10 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
 
     // Connect to WebSocket
     // Only connect in production or if WS URL is configured
-    if (import.meta.env?.PROD || import.meta.env?.VITE_WS_URL) {
+    if (import.meta.env?.PROD || import.meta.env?.VITE_REALTIME_WS_URL) {
       wsClient.current.connect();
     } else {
-      console.log('[Realtime] WebSocket disabled in development (set VITE_WS_URL to enable)');
+      console.log('[Realtime] WebSocket disabled in development (set VITE_REALTIME_WS_URL to enable)');
     }
 
     // Cleanup on unmount
