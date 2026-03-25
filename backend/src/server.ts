@@ -25,10 +25,15 @@ export function startServer(env: BackendEnv = loadEnv()) {
   const app = createApp(env, runtime);
 
   const server = app.listen(env.port, env.host, () => {
+<<<<<<< feature/backend-request-id
     const reqId = 'startup'; // Demo prefix
     console.log(
       `[${reqId}] [vaultdao-backend] listening on http://${env.host}:${env.port} for ${env.stellarNetwork}`,
     );
+=======
+    const logger = createLogger("vaultdao-backend");
+    logger.info(`listening on http://${env.host}:${env.port} for ${env.stellarNetwork}`);
+>>>>>>> main
   });
 
 
