@@ -3,6 +3,10 @@ import { loadEnv } from "./config/env.js";
 import { startServer } from "./server.js";
 import { createLogger } from "./shared/logging/logger.js";
 import { LifecycleManager } from "./app/lifecycle/lifecycle-manager.js";
+import { RealtimeServer, createRealtimeTopic } from "./modules/realtime/index.js";
+import { InMemoryNotificationQueue } from "./modules/notifications/index.js";
+import { ScheduledJobRunner } from "./modules/jobs/index.js";
+import { randomUUID } from "node:crypto";
 
 function maskContractId(contractId: string): string {
   if (contractId.length <= 10) return contractId;
@@ -27,7 +31,63 @@ const env = loadEnv();
 
 logStartupConfig(env);
 
+const logger = createLogger("vaultdao-backend");
+const realtimeServer = new RealtimeServer({
+  onConnected: (connectionId) => {
+    logger.info("realtime connection opened", { connectionId });
+  },
+  onDisconnected: (connectionId) => {
+    logger.info("realtime connection closed", { connectionId });
+  },
+});
+const notificationQueue = new InMemoryNotificationQueue();
+const jobRunner = new ScheduledJobRunner();
+
+const notificationTopic = createRealtimeTopic("notification", "events");
+const unsubscribeNotificationBridge = notificationQueue.subscribe((event) => {
+  realtimeServer.broadcast(notificationTopic, event);
+});
+
+jobRunner.register({
+  name: "notification-queue-heartbeat",
+  intervalMs: 60_000,
+  runOnStart: false,
+  run: async () => {
+    await notificationQueue.publish({
+      id: randomUUID(),
+      topic: notificationTopic,
+      source: "jobs.notification-queue-heartbeat",
+      createdAt: new Date().toISOString(),
+      payload: {
+        queueDepth: notificationQueue.size(),
+      },
+    });
+  },
+});
+
+realtimeServer.start();
+jobRunner.start();
+
 // Start server and integrate with lifecycle management
 const server = startServer(env);
 const lifecycle = new LifecycleManager(server);
+lifecycle.onShutdown({
+  name: "scheduled-job-runner",
+  handler: () => {
+    jobRunner.stop();
+  },
+});
+lifecycle.onShutdown({
+  name: "notification-queue",
+  handler: () => {
+    unsubscribeNotificationBridge();
+    notificationQueue.shutdown();
+  },
+});
+lifecycle.onShutdown({
+  name: "realtime-server",
+  handler: () => {
+    realtimeServer.stop();
+  },
+});
 lifecycle.initialize();
